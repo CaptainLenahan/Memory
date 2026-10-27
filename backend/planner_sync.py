@@ -23,7 +23,27 @@ CACHE_PATH = db.DATA_DIR / "msal_cache.bin"
 
 _lock = threading.Lock()
 _pending_flow: dict | None = None
+_browser_pending = False
 _flow_error: str | None = None
+
+# Plain-English fixes for the sign-in errors people actually hit.
+_AADSTS_HELP = {
+    "AADSTS50011": "Add http://localhost as a redirect URI: in the app registration, Authentication → Add a platform → "
+                   "Mobile and desktop applications → custom redirect URI http://localhost.",
+    "AADSTS500113": "Add http://localhost as a redirect URI: in the app registration, Authentication → Add a platform → "
+                    "Mobile and desktop applications → custom redirect URI http://localhost.",
+    "AADSTS7000218": "Turn on Allow public client flows in the app registration (Authentication), then try again.",
+    "AADSTS65001": "Your organisation needs to approve this app: ask IT to grant admin consent for its permissions.",
+    "AADSTS90094": "Your organisation needs to approve this app: ask IT to grant admin consent for its permissions.",
+    "AADSTS53003": "Blocked by your organisation's Conditional Access policy. Ask IT to allow this app.",
+    "AADSTS700016": "That client ID wasn't found in this tenant. Check the client ID and tenant ID in Settings.",
+}
+
+
+def _explain(result: dict) -> str:
+    desc = result.get("error_description") or result.get("error") or "Sign-in didn't complete."
+    code = next((c for c in _AADSTS_HELP if c in desc), None)
+    return f"{_AADSTS_HELP[code]} ({code})" if code else desc.split(" Trace ID")[0]
 
 
 # ---------- auth ----------
@@ -79,14 +99,45 @@ def status() -> dict:
             out["account"] = accounts[0].get("username")
     if _pending_flow:
         out["pending"] = {k: _pending_flow.get(k) for k in ("user_code", "verification_uri", "message")}
+    elif _browser_pending:
+        out["pending"] = {"method": "browser", "message": "Finish signing in on the Microsoft page that opened in your browser."}
     with db.connect() as con:
         out["last_sync"] = db.get_sync(con, "planner_last_sync")
         out["last_result"] = db.get_sync(con, "planner_last_result")
     return out
 
 
+def start_browser_login() -> dict:
+    """Sign in through the normal browser (authorization code + PKCE, redirect to http://localhost). Works where an
+    organisation blocks device-code sign-in. The app registration needs the redirect URI http://localhost under
+    "Mobile and desktop applications". A thread waits up to 5 minutes for the browser to come back."""
+    global _browser_pending, _flow_error
+    cache = _cache()
+    app = _app(cache)
+    if not app:
+        raise RuntimeError("Set the Azure client ID in Settings first.")
+    if not _browser_pending:
+        _browser_pending, _flow_error = True, None
+
+        def run():
+            global _browser_pending, _flow_error
+            from .reminders import bus
+            try:
+                result = app.acquire_token_interactive(SCOPES, prompt="select_account", timeout=300)
+            except Exception as e:  # timeout, port in use, browser couldn't open
+                result = {"error_description": str(e) or "Sign-in timed out."}
+            _save(cache)
+            _browser_pending = False
+            if "access_token" not in result:
+                _flow_error = _explain(result)
+            bus.publish("planner", {"event": "login", "ok": "access_token" in result, "error": _flow_error})
+
+        threading.Thread(target=run, daemon=True).start()
+    return {"method": "browser", "message": "A Microsoft sign-in page opened in your browser. Finish signing in there."}
+
+
 def start_login() -> dict:
-    """Begin device-code sign-in. The user opens verification_uri and enters user_code; a thread waits."""
+    """Begin device-code sign-in (the fallback). The user opens verification_uri and enters user_code; a thread waits."""
     global _pending_flow, _flow_error
     cache = _cache()
     app = _app(cache)
@@ -104,11 +155,11 @@ def start_login() -> dict:
         _save(cache)
         _pending_flow = None
         if "access_token" not in result:
-            _flow_error = result.get("error_description") or "Sign-in failed."
+            _flow_error = _explain(result)
         bus.publish("planner", {"event": "login", "ok": "access_token" in result, "error": _flow_error})
 
     threading.Thread(target=wait, daemon=True).start()
-    return {k: flow.get(k) for k in ("user_code", "verification_uri", "message", "expires_in")}
+    return {"method": "code", **{k: flow.get(k) for k in ("user_code", "verification_uri", "message", "expires_in")}}
 
 
 def logout() -> None:

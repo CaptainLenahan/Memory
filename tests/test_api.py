@@ -332,3 +332,23 @@ def test_desktop_wallpaper_setting_starts_and_stops_host(monkeypatch):
         client.put("/api/settings", json={"ram_slots": 7})   # unrelated settings don't touch the wallpaper
     assert [c[0] for c in calls if c[0] == "start"] == ["start", "start"] and calls[0] == ("start", "primary") and calls[1] == ("start", "all")
     assert ("stop",) in calls
+
+
+def test_browser_sign_in_and_error_help(monkeypatch):
+    from backend import planner_sync
+
+    class FakeApp:
+        def acquire_token_interactive(self, scopes, **kw):
+            assert "Mail.Read" in scopes and kw["prompt"] == "select_account"
+            return {"error": "invalid_request", "error_description": "AADSTS50011: The redirect URI 'http://localhost:51234' does not match."}
+        def get_accounts(self):
+            return []
+    ran = []
+    monkeypatch.setattr(planner_sync, "_app", lambda cache: FakeApp())
+    monkeypatch.setattr(planner_sync.threading, "Thread", lambda target, daemon: type("T", (), {"start": staticmethod(lambda: ran.append(target()))})())
+    with TestClient(app) as client:
+        r = client.post("/api/planner/login", json={"method": "browser"}).json()
+        assert r["method"] == "browser" and ran
+        st = client.get("/api/planner/status").json()
+        assert "http://localhost" in st["error"] and "AADSTS50011" in st["error"] and st["pending"] is None
+    planner_sync._flow_error = None

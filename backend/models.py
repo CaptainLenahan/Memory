@@ -164,6 +164,10 @@ class DependencyBody(BaseModel):
     depends_on_id: int
 
 
+class LoginBody(BaseModel):
+    method: Literal["browser", "code"] = "browser"   # browser sign-in, or a device code to type in
+
+
 class OpenBody(BaseModel):
     task_id: Optional[int] = None
     new: bool = False                                    # open the new-task form

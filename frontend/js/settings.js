@@ -176,7 +176,7 @@ async function renderPlanner(box, save) {
     buttons.append(h('button', { class: 'btn primary', onclick: async () => {
       if (!(await save())) return;
       try {
-        const flow = await api('/api/planner/login', { method: 'POST' });
+        const flow = await api('/api/planner/login', { method: 'POST', body: { method: 'browser' } });
         showDeviceCode(box, flow);
         waitForLogin(box, save);
       } catch (e) { toastError(e); }
@@ -187,6 +187,17 @@ async function renderPlanner(box, save) {
 }
 
 function showDeviceCode(box, flow) {
+  if (flow.method === 'browser' || (!flow.user_code && flow.message)) {
+    box.querySelector('.device-code')?.remove();
+    box.append(h('div', { class: 'device-code' },
+      h('div', {}, flow.message || 'Finish signing in on the Microsoft page that opened in your browser.'),
+      h('div', { class: 'status-line' }, 'Waiting for you to finish signing in… ',
+        h('a', { href: '#', onclick: async e => {
+          e.preventDefault();
+          try { const f = await api('/api/planner/login', { method: 'POST', body: { method: 'code' } }); showDeviceCode(box, f); } catch (err) { toastError(err); }
+        } }, 'Use a sign-in code instead'))));
+    return;
+  }
   box.querySelector('.device-code')?.remove();
   box.append(h('div', { class: 'device-code' },
     h('div', {}, 'Open ', h('a', { href: flow.verification_uri, target: '_blank', rel: 'noopener' }, flow.verification_uri), ' and enter this code:'),

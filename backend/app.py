@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from . import claude_service, db, desktop, engine, mail, notify, paths, planner_sync, sysinfo, wallpaper, windows  # noqa: E402
 from .classifier import creative_score, region_for  # noqa: E402
 from .models import (  # noqa: E402
-    ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, OpenBody, PlaceBody,
+    ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, LoginBody, OpenBody, PlaceBody,
     TemplateBody, TemplateFromTask, TemplateUse,
     ReorderBody, RethinkBody, SettingsUpdate, TaskCreate, TaskUpdate, UnplaceBody,
 )
@@ -795,9 +795,9 @@ def planner_status():
 
 
 @app.post("/api/planner/login")
-def planner_login():
+def planner_login(body: LoginBody | None = None):
     try:
-        return planner_sync.start_login()
+        return planner_sync.start_login() if body and body.method == "code" else planner_sync.start_browser_login()
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except ValueError as e:  # msal raises ValueError for malformed authority / client id

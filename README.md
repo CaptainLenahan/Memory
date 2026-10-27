@@ -93,9 +93,9 @@ Requests to Opus 5.5, Sonnet 5.5, Opus 5 and Fable 5.1 enable Anthropic's server
 Planner sync uses Microsoft Graph with a device-code sign-in. Register an app once:
 
 1. In the Azure portal, open **Microsoft Entra ID → App registrations → New registration**. Name it "Memory" and choose *Accounts in this organizational directory only* (or multitenant if you prefer). Leave the redirect URI blank.
-2. Under **Authentication → Advanced settings**, set **Allow public client flows** to **Yes**.
+2. Under **Authentication**, click **Add a platform → Mobile and desktop applications** and add the custom redirect URI `http://localhost`. Then, under **Advanced settings**, set **Allow public client flows** to **Yes**. No client secret is needed.
 3. Under **API permissions → Add a permission → Microsoft Graph → Delegated**, add `Tasks.ReadWrite`, `User.Read`, `Mail.Read` and `Mail.Send`. The mail permissions power the Inbox tab and email notifications. If your tenant requires it, ask an admin to **Grant admin consent**.
-4. Copy the **Application (client) ID** and **Directory (tenant) ID** into Settings → *Microsoft Planner*, then click **Sign in with Microsoft**. Open the link shown and enter the code.
+4. Copy the **Application (client) ID** and **Directory (tenant) ID** into Settings → *Microsoft Planner & Outlook*, then click **Sign in with Microsoft**. A Microsoft sign-in page opens in your browser. If your organisation allows device-code sign-in, **Use a sign-in code instead** works too.
 
 Once you're signed in:
 
