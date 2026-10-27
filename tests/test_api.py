@@ -315,3 +315,20 @@ def test_old_manual_links_become_a_sequence(tmp_path, monkeypatch):
         assert not [l for l in client.get("/api/state").json()["links"] if l["kind"] == "manual"]
         for i in ids:
             client.delete(f"/api/tasks/{i}")
+
+
+def test_desktop_wallpaper_setting_starts_and_stops_host(monkeypatch):
+    from backend import wallpaper
+    calls = []
+    monkeypatch.setattr(wallpaper, "start", lambda port, screens="all": calls.append(("start", screens)))
+    monkeypatch.setattr(wallpaper, "stop", lambda: calls.append(("stop",)))
+    with TestClient(app) as client:
+        assert client.get("/api/wallpaper").json()["enabled"] is False
+        client.put("/api/settings", json={"desktop_wallpaper": True, "wallpaper_screens": "primary"})
+        assert client.get("/api/wallpaper").json()["enabled"] is True
+        client.put("/api/settings", json={"wallpaper_screens": "all"})
+        client.put("/api/settings", json={"desktop_wallpaper": False})
+        assert client.post("/api/wallpaper/restart").status_code == 400
+        client.put("/api/settings", json={"ram_slots": 7})   # unrelated settings don't touch the wallpaper
+    assert [c[0] for c in calls if c[0] == "start"] == ["start", "start"] and calls[0] == ("start", "primary") and calls[1] == ("start", "all")
+    assert ("stop",) in calls

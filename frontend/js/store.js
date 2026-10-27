@@ -37,7 +37,7 @@ export function connectEvents() {
   const open = () => {
     es = new EventSource('/api/events');
     es.addEventListener('state', refreshSoon);
-    for (const name of ['reminder', 'planner', 'popup', 'windows']) {
+    for (const name of ['reminder', 'planner', 'popup', 'windows', 'wallpaper']) {
       es.addEventListener(name, e => {
         const data = JSON.parse(e.data || '{}');
         for (const fn of eventHandlers[name] || []) fn(data);

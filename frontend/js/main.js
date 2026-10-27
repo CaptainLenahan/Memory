@@ -19,8 +19,10 @@ import { addDays, closePopover, debounce, fmtDate, h, icon, modal, popover, REGI
 // ?popup=<id>: one of those pop-up windows: just the task editor (or the new-task form), no brain.
 const params = new URLSearchParams(location.search);
 const WALLPAPER = params.has('wallpaper');
+const SCREEN = params.get('screen'); // set when Memory itself hosts the desktop wallpaper (one window per screen)
 const POPUP = params.get('popup');
 if (WALLPAPER) document.body.classList.add('wallpaper');
+if (WALLPAPER && SCREEN != null) document.title = `Memory Wallpaper ${SCREEN}`; // how the host finds this window
 if (POPUP) document.body.classList.add('popup-window');
 const openWindow = body => api('/api/open', { method: 'POST', body }).catch(toastError);
 const openTaskWindow = id => openWindow({ task_id: id, window: 'popup' });
@@ -156,14 +158,9 @@ initInbox({
 onInboxChange(() => (WALLPAPER ? renderWallpaperInbox() : renderListPane()));
 
 // ---------- first run + updates (full app only) ----------
-const WALLPAPER_URL = `${location.origin}/?wallpaper`;
-
 function showWelcome() {
   const step = (n, title, text, button) => h('div', { class: 'welcome-step' }, h('span', { class: 'n' }, String(n)),
     h('div', {}, h('div', { class: 'wt' }, title), h('div', { class: 'help' }, text), button || null));
-  const copy = h('button', { class: 'btn small', onclick: async () => {
-    try { await navigator.clipboard.writeText(WALLPAPER_URL); copy.textContent = 'Copied'; } catch { copy.textContent = WALLPAPER_URL; }
-  } }, 'Copy wallpaper address');
   const done = () => api('/api/settings', { method: 'PUT', body: { welcomed: true } }).catch(() => {});
   modal({
     title: 'Welcome to Memory', wide: true, onClose: done,
@@ -173,7 +170,11 @@ function showWelcome() {
       step(2, 'Connect Claude (optional)', 'Add an Anthropic API key to chat about your tasks, let AI sort your synapses, and turn emails into tasks.',
         h('button', { class: 'btn small', onclick: () => { document.querySelector('.modal-backdrop')?.remove(); done(); openSettings(); } }, 'Open Settings')),
       step(3, 'Connect Microsoft (optional)', 'Sign in to pull Planner tasks into your basket and see your Outlook inbox. Needs an Azure app registration; Settings and the README explain how.'),
-      step(4, 'Put the brain on your desktop (optional)', 'Install the free Lively Wallpaper app from the Microsoft Store, choose Add Wallpaper, and paste this address.', copy)),
+      step(4, 'Put the brain on your desktop (optional)', 'Memory can show the brain as your desktop wallpaper, behind your icons, on every screen. Click synapses right on the desktop.',
+        h('button', { class: 'btn small', onclick: async e => {
+          e.currentTarget.disabled = true;
+          try { await api('/api/settings', { method: 'PUT', body: { desktop_wallpaper: true } }); e.currentTarget.textContent = 'Wallpaper on'; } catch (err) { toastError(err); }
+        } }, 'Turn on desktop wallpaper'))),
     actions: [{ label: 'Get started', kind: 'primary' }],
   });
 }
@@ -291,6 +292,8 @@ function lockForWindows(n) {
   renderWallpaperHud();
 }
 if (WALLPAPER) store.onEvent('windows', w => lockForWindows(w.open));
+// built-in wallpaper: stop drawing while a maximised or full-screen window covers this screen
+if (WALLPAPER && SCREEN != null) store.onEvent('wallpaper', w => brain.setPaused('covered', (w.covered || []).includes(Number(SCREEN))));
 
 function renderWallpaperHud() {
   const ram = document.getElementById('ram');

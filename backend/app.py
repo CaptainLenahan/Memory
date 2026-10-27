@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import threading
 import os
 import uuid
 import webbrowser
@@ -22,7 +23,7 @@ from fastapi import Path as PathParam  # noqa: E402
 from fastapi.responses import FileResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from . import claude_service, db, desktop, engine, mail, notify, paths, planner_sync, sysinfo, windows  # noqa: E402
+from . import claude_service, db, desktop, engine, mail, notify, paths, planner_sync, sysinfo, wallpaper, windows  # noqa: E402
 from .classifier import creative_score, region_for  # noqa: E402
 from .models import (  # noqa: E402
     ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, OpenBody, PlaceBody,
@@ -42,8 +43,13 @@ async def lifespan(app: FastAPI):
         engine.recompute(con)
     bus.loop = asyncio.get_running_loop()
     task = asyncio.create_task(background_loop())
+    with db.connect() as con:
+        s = db.get_settings(con)
+    if s.get("desktop_wallpaper"):  # give the server a moment to start listening before Edge asks for the page
+        threading.Timer(2, wallpaper.start, args=(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))).start()
     yield
     task.cancel()
+    wallpaper.stop()
 
 
 log = logging.getLogger("memory.app")
@@ -603,7 +609,30 @@ def put_settings(body: SettingsUpdate):
     with db.connect() as con:
         db.set_settings(con, values)
         changed(con, fill=True)
-        return db.get_settings(con)
+        s = db.get_settings(con)
+    if "desktop_wallpaper" in values or ("wallpaper_screens" in values and s.get("desktop_wallpaper")):
+        if s.get("desktop_wallpaper"):
+            wallpaper.start(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))
+        else:
+            wallpaper.stop()
+    return s
+
+
+@app.get("/api/wallpaper")
+def wallpaper_status():
+    with db.connect() as con:
+        enabled = bool(db.get_settings(con).get("desktop_wallpaper"))
+    return {"enabled": enabled, **wallpaper.status()}
+
+
+@app.post("/api/wallpaper/restart")
+def wallpaper_restart():
+    with db.connect() as con:
+        s = db.get_settings(con)
+    if not s.get("desktop_wallpaper"):
+        raise HTTPException(400, "Turn on the desktop wallpaper in Settings first.")
+    wallpaper.start(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))
+    return {"ok": True}
 
 
 @app.delete("/api/settings/anthropic_api_key")

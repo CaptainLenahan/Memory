@@ -24,6 +24,13 @@ export async function openSettings() {
   const autoSync = h('input', { type: 'checkbox', checked: s.planner_auto_sync });
   const plannerBox = h('div');
   const links = quickLinksEditor(s.quick_links || []);
+  const wallpaperOn = h('input', { type: 'checkbox', checked: s.desktop_wallpaper });
+  const wallpaperScreens = h('select', { class: 'input' }, [['all', 'All screens'], ['primary', 'Main screen only']]
+    .map(([v, l]) => h('option', { value: v, selected: (s.wallpaper_screens || 'all') === v }, l)));
+  const wallpaperStatus = h('div', { class: 'status-line' }, '…');
+  api('/api/wallpaper').then(w => {
+    wallpaperStatus.textContent = w.running ? `On, ${w.screens} screen${w.screens === 1 ? '' : 's'}` : w.enabled ? `Not showing: ${w.reason}` : 'Off';
+  }).catch(() => { wallpaperStatus.textContent = ''; });
   const aboutBox = h('div', { class: 'status-line' }, 'Memory');
   const checkUpdates = async () => {
     aboutBox.replaceChildren('Checking…');
@@ -75,6 +82,12 @@ export async function openSettings() {
       h('label', {}, 'Tenant'), tenant,
       h('label', {}, 'Auto-sync'), h('label', {}, autoSync, ' Sync every 15 minutes while signed in')),
     plannerBox,
+    h('div', { class: 'form-section' }, 'Desktop wallpaper'),
+    h('div', { class: 'form-grid' },
+      h('label', {}, 'Show on desktop'), h('label', {}, wallpaperOn, ' Show the brain as my desktop wallpaper, behind my icons'),
+      h('label', {}, 'Screens'), wallpaperScreens,
+      h('div', { class: 'help' }, 'Click synapses, drag them and use quick links right on the desktop. It pauses while a maximised or full-screen app covers it. If Lively Wallpaper is running, Memory leaves the desktop to it.'),
+      h('label', {}, 'Status'), wallpaperStatus),
     h('div', { class: 'form-section' }, 'Quick links'),
     h('div', { class: 'help', style: { marginBottom: '8px' } }, 'Shown on the desktop wallpaper (bottom-left) and in the left rail. Use a web address, an app link like ms-teams:, or a folder/file path such as C:\\Reports or ~\\Downloads.'),
     links.el,
@@ -91,6 +104,7 @@ export async function openSettings() {
       ram_slots: Number(ram.value), weekly_capacity_hours: Number(cap.value), auto_fill: autoFill.checked,
       model: model.value, azure_client_id: clientId.value.trim(), azure_tenant_id: tenant.value.trim() || 'organizations',
       planner_auto_sync: autoSync.checked, quick_links: links.value(), notify_email: notifyEmail.value.trim(),
+      desktop_wallpaper: wallpaperOn.checked, wallpaper_screens: wallpaperScreens.value,
     };
     if (key.value.trim()) values.anthropic_api_key = key.value.trim();
     try {

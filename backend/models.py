@@ -99,6 +99,8 @@ class SettingsUpdate(BaseModel):
     quick_links: Optional[list[QuickLink]] = Field(default=None, max_length=24)
     slot_positions: Optional[dict[str, list[float]]] = None
     welcomed: Optional[bool] = None
+    desktop_wallpaper: Optional[bool] = None
+    wallpaper_screens: Optional[Literal["all", "primary"]] = None
     notify_email: Optional[str] = Field(default=None, max_length=254, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 

@@ -50,13 +50,17 @@ powershell -ExecutionPolicy Bypass -File scripts\startup.ps1
 
 ### Use the brain as your desktop wallpaper
 
-`http://localhost:8765/?wallpaper` is a brain-only view: no sidebars or buttons, just a small summary card in the bottom-right, with a lower frame rate. Show it as a live wallpaper with the free [Lively Wallpaper](https://www.rocksdanister.com/lively/) app (Microsoft Store, or `winget install rocksdanister.LivelyWallpaper`):
+Memory can put the brain on your desktop itself, behind your icons and on every screen. No other app is needed. Turn it on in **Settings → Desktop wallpaper** (or from the welcome screen), and choose **All screens** or **Main screen only**.
 
-1. Make sure Memory starts at sign-in (above).
-2. In Lively, click **+ Add Wallpaper**, paste `http://localhost:8765/?wallpaper` into the URL box, then press → and **OK**.
-3. Select the new wallpaper and apply it to your screen(s).
+- **How it works:** one borderless Edge window per screen shows `http://localhost:8765/?wallpaper`, slotted into Windows' desktop layer between your icons and the normal wallpaper. Both the newer Windows 11 (24H2+) desktop and the classic one are supported.
+- **Clicking:** mouse movement, clicks, drags and the scroll wheel over the bare desktop are passed through to the brain. Over any other window, nothing is passed through.
+- **Pausing:** a screen's brain stops drawing while a maximised or full-screen window covers it, and while a Memory pop-up is open.
+- **Restarts:** if Explorer restarts, the wallpaper rebuilds itself. If Lively Wallpaper is running, Memory gives the desktop to it, so close or uninstall Lively to use the built-in one.
+- **Profile:** the wallpaper windows use their own small Edge profile, `wallpaper-profile` in the data folder.
 
-Working from the desktop (Lively only passes mouse clicks to the wallpaper, so typing happens in pop-up windows):
+You can still use [Lively Wallpaper](https://www.rocksdanister.com/lively/) instead: leave the setting off, then in Lively choose **+ Add Wallpaper** and paste `http://localhost:8765/?wallpaper`.
+
+Working from the desktop (the wallpaper only gets mouse input, so typing happens in pop-up windows):
 
 | On the wallpaper | What happens |
 |---|---|
@@ -68,9 +72,9 @@ Working from the desktop (Lively only passes mouse clicks to the wallpaper, so t
 
 The wallpaper also shows a translucent readout of your computer in the top-left: name, Windows version, CPU, GPU, RAM and disk, plus live CPU, RAM, GPU, disk, network, uptime and battery. It's read from Windows' own counters, sampled every 2 s only while something is showing it. Your **quick links** sit in the bottom-left; edit them in Settings → *Quick links*. They can be web addresses, app links (`ms-teams:`) or file and folder paths (`C:\Reports`, `~\Downloads`), and they also appear at the bottom of the app's left rail.
 
-While a Memory pop-up or app window is open, the wallpaper brain holds still and stops drawing, because Lively keeps forwarding mouse movement even when another window has focus. On large screens the brain renders at a capped resolution and is scaled up, which keeps integrated graphics comfortable.
+While a Memory pop-up or app window is open, the wallpaper brain holds still and stops drawing, so moving those windows never spins it. On large screens the brain renders at a capped resolution and is scaled up, which keeps integrated graphics comfortable.
 
-Pop-ups are Edge (or Chrome) app windows with no tabs or address bar. Only one is open at a time, since opening another closes the previous one. They use their own small browser profile in `data/app-window-profile`, so they always open centred and at a set size. Reminders appear as toasts on the wallpaper, and **Open** brings up the task. Lively pauses the wallpaper while a window is maximised or full-screen; you can change that in Lively's *Performance* settings.
+Pop-ups are Edge (or Chrome) app windows with no tabs or address bar. Only one is open at a time, since opening another closes the previous one. They use their own small browser profile in `data/app-window-profile`, so they always open centred and at a set size. Reminders appear as toasts on the wallpaper, and **Open** brings up the task.
 
 ### Links to a task
 
