@@ -56,7 +56,8 @@ def open_window(url: str, kind: str = "popup") -> str:
     # A browser that's already running ignores size/position flags, so Memory's windows get their own profile
     # (and therefore their own browser instance) under data/.
     profile = db.DATA_DIR / "app-window-profile"
-    subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--no-first-run", "--no-default-browser-check",
+    # InPrivate: Edge doesn't sign these windows in to your account, so no sync prompts pop up over them
+    subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--inprivate", "--no-first-run", "--no-default-browser-check",
                       f"--window-size={ww},{hh}", f"--window-position={x},{y}"],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
     return "window"

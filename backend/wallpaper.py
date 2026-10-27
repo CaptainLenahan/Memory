@@ -117,6 +117,7 @@ if WINDOWS:
         ("SetThreadDpiAwarenessContext", ctypes.c_void_p, [ctypes.c_void_p]),
         ("SetWindowRgn", ctypes.c_int, [HWND, ctypes.c_void_p, wintypes.BOOL]),
         ("GetWindow", HWND, [HWND, wintypes.UINT]),
+        ("GetWindowThreadProcessId", wintypes.DWORD, [HWND, ctypes.POINTER(wintypes.DWORD)]),
     ]:
         f = getattr(user32, name)
         f.restype, f.argtypes = res, args
@@ -165,7 +166,10 @@ def _desktop_layer() -> tuple:
     user32.SendMessageTimeoutW(progman, 0x052C, 0, 0, 0, 1000, ctypes.byref(res))
     defview = user32.FindWindowExW(progman, None, "SHELLDLL_DefView", None)
     if defview:  # Windows 11 24H2+: icons and wallpaper are both children of Progman
-        return progman, defview, "raised"
+        # Live inside the wallpaper layer (the WorkerW under the icons): Edge re-orders its own window now and then,
+        # and inside WorkerW that can never lift it above the icons.
+        workerw = user32.FindWindowExW(progman, None, "WorkerW", None)
+        return (workerw, None, "raised") if workerw else (progman, defview, "raised")
     found = []
 
     def cb(h, _):
@@ -181,7 +185,8 @@ def _find_window(title: str):
     hits = []
 
     def cb(h, _):
-        if _cls(h) == "Chrome_WidgetWin_1" and _title(h) == title:
+        t = _title(h)  # Edge may add a suffix such as " - [InPrivate]"
+        if _cls(h) == "Chrome_WidgetWin_1" and (t == title or t.startswith(title + " ")):
             hits.append(h)
         return True
     user32.EnumWindows(ENUMPROC(cb), 0)
@@ -196,7 +201,7 @@ def _desktop_parent_only() -> tuple:
     """Where embedded wallpaper windows live, without asking Explorer to change anything."""
     progman = user32.FindWindowW("Progman", None)
     if user32.FindWindowExW(progman, None, "SHELLDLL_DefView", None):
-        return progman, None, "raised"
+        return user32.FindWindowExW(progman, None, "WorkerW", None) or progman, None, "raised"
     found = []
 
     def cb(h, _):
@@ -291,7 +296,9 @@ class _Host:
                 user32.PostMessageW(old, WM_CLOSE, 0, 0)
                 time.sleep(0.5)
             url = f"http://localhost:{self.port}/?wallpaper&screen={i}"
-            subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--no-first-run", "--no-default-browser-check",
+            # InPrivate: Edge never signs these windows in to your account, so no sync/sign-in prompts land on the
+            # wallpaper (where nobody could click them)
+            subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--inprivate", "--no-first-run", "--no-default-browser-check",
                               "--disable-features=CalculateNativeWinOcclusion", "--disable-backgrounding-occluded-windows",
                               "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--hide-crash-restore-bubble",
                               f"--window-position={l},{t}", f"--window-size={r - l},{b - t}"],
@@ -363,6 +370,24 @@ class _Host:
                 user32.SetWindowPos(w["hwnd"], self.below, 0, 0, 0, 0, 0x1 | 0x2 | SWP_NOACTIVATE)  # NOSIZE | NOMOVE
         return drifted
 
+    def _close_strays(self) -> None:
+        """Close any other window the wallpaper's Edge opens (a prompt or bubble): behind the icons nobody could click it."""
+        pids = set()
+        for w in self.windows:
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(w["hwnd"], ctypes.byref(pid))
+            pids.add(pid.value)
+        ours = {int(w["hwnd"] or 0) for w in self.windows}
+
+        def cb(h, _):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+            if pid.value in pids and int(h or 0) not in ours and user32.IsWindowVisible(h) and _cls(h).startswith("Chrome_WidgetWin"):
+                log.info("closing a stray Edge window on the wallpaper: %r", _title(h))
+                user32.PostMessageW(h, WM_CLOSE, 0, 0)
+            return True
+        user32.EnumWindows(ENUMPROC(cb), 0)
+
     # ----- mouse pass-through -----
     def _is_desktop(self, hwnd) -> bool:
         if hwnd == self._last_hwnd:
@@ -429,6 +454,7 @@ class _Host:
                 threading.Timer(3, lambda: start(self.port, self.screens)).start()
                 return
             self._keep_below_icons()
+            self._close_strays()
             if time.monotonic() - lively_check > 10:
                 lively_check = time.monotonic()
                 if lively_running():
