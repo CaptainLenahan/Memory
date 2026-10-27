@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memory</title>
+  <link rel="icon" type="image/png" href="/icon.png">
+  <link rel="stylesheet" href="/css/app.css">
+  <script src="/js/theme-boot.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three.module.js", "three/addons/": "/vendor/" } }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 5c-3 0-5 2-5.5 4C7.5 9.3 6 11.6 6.4 14 4.6 15 4 17.3 5 19.2c-.6 2.2.7 4.5 3 5 .8 2 2.8 3 5 2.6.8.8 1.9 1.2 3 1.2V5Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 5c3 0 5 2 5.5 4 3 .3 4.5 2.6 4.1 5 1.8 1 2.4 3.3 1.4 5.2.6 2.2-.7 4.5-3 5-.8 2-2.8 3-5 2.6-.8.8-1.9 1.2-3 1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="11" cy="14" r="1.6" fill="currentColor"/><circle cx="21" cy="12" r="1.6" fill="currentColor"/><circle cx="20" cy="21" r="1.6" fill="currentColor"/><circle cx="11" cy="21" r="1.6" fill="currentColor"/></svg>
+      <span>Memory</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="brain" role="tab">Brain</button>
+      <button class="tab" data-view="dashboard" role="tab">Dashboard</button>
+    </nav>
+    <div class="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="search" placeholder="Search memory…" autocomplete="off">
+    </div>
+    <div class="top-actions">
+      <button id="btn-planner" class="btn ghost" title="Sync Microsoft Planner">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h-4M6 22v-4h4"/></svg>
+        <span>Planner</span>
+      </button>
+      <button id="btn-claude" class="btn claude" title="Ask Claude">
+        <svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>
+        <span>Claude</span>
+      </button>
+      <button id="btn-settings" class="btn icon" title="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="rail" id="rail" aria-label="Lists"></aside>
+
+    <main class="center">
+      <section id="view-brain" class="view active">
+        <div id="brain-stage">
+          <div id="brain-canvas"></div>
+          <div id="brain-labels"></div>
+        </div>
+
+        <div class="hud hud-top">
+          <div class="ram" id="ram">
+            <div class="ram-label"><span>RAM</span><strong id="ram-count">0 / 0</strong></div>
+            <div class="ram-bar" id="ram-bar"></div>
+          </div>
+          <div class="hud-actions">
+            <button class="btn" id="btn-sort" title="Move basket tasks onto the brain or into the queue">Sort basket <span class="pill" id="basket-pill">0</span></button>
+            <button class="btn" id="btn-rethink" title="Re-allocate synapses by priority (keeps pinned tasks)">Re-think</button>
+            <button class="btn claude" id="btn-delegate" title="Let Claude propose how to fill your synapses">Delegate with AI</button>
+            <button class="btn" id="btn-arrange" title="Drag synapses to new spots on the brain">Arrange</button>
+            <button class="btn icon" id="btn-reset-view" title="Reset view">
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="insight-card" id="insight-card"></div>
+
+        <div class="legend">
+          <span><i style="--c: var(--logical)"></i>Logical · left</span>
+          <span><i style="--c: var(--balanced)"></i>Balanced</span>
+          <span><i style="--c: var(--creative)"></i>Creative · right</span>
+          <span><i class="ring" style="--c: var(--warn)"></i>Due soon</span>
+          <span><i class="ring" style="--c: var(--danger)"></i>Overdue</span>
+          <span class="hint">Front of the brain = most pressing</span>
+        </div>
+
+        <div class="queue" id="queue" data-drop="backlog">
+          <div class="queue-title">Queue</div>
+          <div class="queue-items" id="queue-items"></div>
+        </div>
+
+        <div class="drop-dock" id="drop-dock">
+          <div class="dock-target" data-drop="basket">Basket</div>
+          <div class="dock-target" data-drop="backlog">Queue</div>
+          <div class="dock-target done" data-drop="done">✓ Complete</div>
+        </div>
+      </section>
+
+      <section id="view-dashboard" class="view"></section>
+    </main>
+
+    <aside class="listpane" id="listpane"></aside>
+  </div>
+
+  <div class="tp-overlay" id="task-overlay">
+    <section class="popup" id="task-panel" role="dialog" aria-modal="true" aria-label="Synapse details" tabindex="-1"></section>
+  </div>
+  <aside class="drawer" id="claude-panel" aria-label="Claude"></aside>
+  <div id="modal-root"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="drag-ghost"></div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
