@@ -34,16 +34,18 @@ Then open http://localhost:8765. Everything is stored locally in `data/`: `memor
 
 ### Start automatically when you sign in
 
+Memory is a small local server (FastAPI on `http://localhost:8765`, only reachable from your own PC) plus the web pages it serves. To have it always running:
+
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\startup.ps1
 ```
 
-This adds two per-user shortcuts and needs no admin rights:
+This needs no admin rights. It sets up:
 
-- **Memory (background)** in your Startup folder runs `launcher.pyw` with `pythonw`. The server starts silently at sign-in, with no console window, so reminders and Planner auto-sync keep running.
-- **Memory** in the Start menu opens the app in your browser and starts the server first if it isn't running. Pin it to the taskbar if you like.
+- **A Task Scheduler task named "Memory".** It starts the server silently 20 seconds after you sign in, with no console window, then checks every 5 minutes and starts it again if it has stopped. If your organisation blocks scheduled tasks, the script falls back to a Startup-folder shortcut.
+- **A "Memory" shortcut in the Start menu.** It opens the app in your browser and starts the server first if needed. Pin it to the taskbar if you like.
 
-Server output goes to `data/server.log`. To remove both shortcuts, add `-Remove` to the command above. To stop the background server, end the `pythonw.exe` process in Task Manager.
+Server output goes to `data/server.log`. To see or pause the task, open Task Scheduler and find **Memory** in the library. To remove everything, add `-Remove` to the command above.
 
 ### Use the brain as your desktop wallpaper
 
