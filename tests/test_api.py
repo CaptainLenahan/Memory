@@ -262,3 +262,56 @@ def test_slot_positions_setting():
         assert client.put("/api/settings", json={"slot_positions": {"x": [0, 0, 0, 0, 0, 1]}}).status_code == 422
         assert client.put("/api/settings", json={"slot_positions": {"1": [0, 0, 0]}}).status_code == 422
         client.put("/api/settings", json={"slot_positions": {}})
+
+
+def test_version_and_update_check(monkeypatch):
+    from backend import app as app_module
+    from backend.version import __version__
+
+    class Resp:
+        ok = True
+        def json(self):
+            return {"tag_name": "v99.0.0", "html_url": "https://github.com/x/y/releases/v99.0.0",
+                    "assets": [{"name": "Memory-Setup-99.0.0.exe", "browser_download_url": "https://dl/Memory-Setup-99.0.0.exe"}]}
+    monkeypatch.setattr("requests.get", lambda *a, **k: Resp())
+    app_module._latest_release.update(at=0.0, data=None)
+    with TestClient(app) as client:
+        assert client.get("/api/state").json()["version"] == __version__
+        v = client.get("/api/version").json()
+        assert v["update_available"] and v["latest"]["download"].endswith(".exe") and v["version"] == __version__
+    app_module._latest_release.update(at=0.0, data=None)
+
+
+def test_paths_default_to_appdata_when_packaged(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    from backend import paths
+    monkeypatch.delenv("MEMORY_DATA_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    try:
+        frozen = importlib.reload(paths)
+        assert frozen.DATA_DIR == tmp_path / "Memory" and frozen.ENV_FILE == tmp_path / "Memory" / ".env"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(paths)
+
+
+def test_old_manual_links_become_a_sequence(tmp_path, monkeypatch):
+    import sqlite3
+    from backend import db
+    con = sqlite3.connect(db.DB_PATH)
+    con.row_factory = sqlite3.Row
+    ids = [con.execute("INSERT INTO tasks(title, created_at, updated_at) VALUES(?, '2026-01-01', '2026-01-01')", (f"L{i}",)).lastrowid for i in range(3)]
+    con.execute("INSERT INTO links(a_id, b_id, kind, strength) VALUES(?, ?, 'manual', 1)", (ids[1], ids[2]))
+    con.execute("INSERT INTO links(a_id, b_id, kind, strength) VALUES(?, ?, 'manual', 1)", (ids[0], ids[1]))
+    con.execute("DELETE FROM sync_state WHERE key = 'manual_links_to_dependencies'")
+    con.commit()
+    con.close()
+    db.init()
+    with TestClient(app) as client:
+        seq = {t["id"]: t["seq"] for t in client.get("/api/state").json()["tasks"] if t["id"] in ids}
+        assert [seq[i]["step"] for i in ids] == [1, 2, 3]
+        assert not [l for l in client.get("/api/state").json()["links"] if l["kind"] == "manual"]
+        for i in ids:
+            client.delete(f"/api/tasks/{i}")

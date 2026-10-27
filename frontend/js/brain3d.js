@@ -389,11 +389,17 @@ export class Brain {
     }
   }
 
-  addPulse(curve, baseHex, size, parent) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: themed(baseHex), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    s.scale.setScalar(size);
-    parent.add(s);
-    const pulse = { sprite: s, curve, t: Math.random(), speed: 0.12 + Math.random() * 0.25 };
+  // trail: number of fading sprites behind the head, so the impulse reads as a comet moving one way
+  addPulse(curve, baseHex, size, parent, trail = 0) {
+    const sprite = (scale) => {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: themed(baseHex), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+      s.scale.setScalar(scale);
+      parent.add(s);
+      return s;
+    };
+    const s = sprite(size);
+    const tail = Array.from({ length: trail }, (_, k) => sprite(size * (1 - (k + 1) / (trail + 2))));
+    const pulse = { sprite: s, tail, curve, t: Math.random(), speed: 0.12 + Math.random() * 0.25 };
     this.pulses.push(pulse);
     return pulse;
   }
@@ -476,7 +482,10 @@ export class Brain {
       syn.label.classList.toggle('urgent', syn.urgentColor === URGENT);
       const title = t ? t.title : 'Empty synapse';
       const meta = t ? [t.due_at ? `due ${t.due_at.slice(5, 10)}` : null, t.checklist_total ? `${t.checklist_done}/${t.checklist_total}` : null].filter(Boolean).join(' · ') : 'drop a task';
-      syn.label.innerHTML = `<span class="syn-idx">${syn.index + 1}</span><span class="syn-title">${escapeHtml(title)}</span><span class="syn-meta">${escapeHtml(meta)}</span>${t?.seq ? stepPill(t, byId) : ''}`;
+      const badge = t?.seq
+        ? `<span class="syn-idx seq ${t.id === t.seq.goal ? 'goal' : ''}" title="Step ${t.seq.step} of ${t.seq.of} (synapse ${syn.index + 1})">${t.seq.step}</span>`
+        : `<span class="syn-idx" title="Synapse ${syn.index + 1}">${syn.index + 1}</span>`;
+      syn.label.innerHTML = `${badge}<span class="syn-title">${escapeHtml(title)}</span><span class="syn-meta">${escapeHtml(meta)}</span>${t?.seq ? stepPill(t, byId) : ''}`;
     }
     this.setLinks(links, deps);
   }
@@ -535,7 +544,7 @@ export class Brain {
       const pulseGroup = new THREE.Group();
       this.root.add(mesh, pulseGroup);
       for (let i = 0; i < o.pulses; i++) {
-        const p = this.addPulse(curve, o.pulseHex, o.pulseSize, pulseGroup);
+        const p = this.addPulse(curve, o.pulseHex, o.pulseSize, pulseGroup, o.trail || 0);
         Object.assign(p, { axon: true, speed: o.speed, t: i / o.pulses });
       }
       this.links.push({ mesh, pulseGroup });
@@ -548,7 +557,7 @@ export class Brain {
     for (const d of deps) {
       const first = byTask.get(d.depends_on_id), next = byTask.get(d.task_id);
       if (!first || !next) continue;
-      axon(first, next, { radius: 0.008, color: themed('#e8fbff'), opacity: 0.6, pulses: 3, pulseHex: '#ffffff', pulseSize: 0.09, speed: 0.45 });
+      axon(first, next, { radius: 0.008, color: themed('#e8fbff'), opacity: 0.55, pulses: 3, pulseHex: '#ffffff', pulseSize: 0.1, speed: 0.4, trail: 6 });
     }
   }
 
@@ -746,6 +755,13 @@ export class Brain {
       p.t = (p.t + dt * p.speed) % 1;
       p.sprite.position.copy(p.curve.getPoint(p.t));
       p.sprite.material.opacity = Math.sin(p.t * Math.PI);
+      p.tail?.forEach((s, k) => {   // fading tail behind the head: shows which way the impulse travels
+        const tt = p.t - (k + 1) * 0.022;
+        s.visible = tt > 0;
+        if (!s.visible) return;
+        s.position.copy(p.curve.getPoint(tt));
+        s.material.opacity = Math.sin(tt * Math.PI) * (1 - (k + 1) / (p.tail.length + 1)) * 0.9;
+      });
     }
 
     const camPos = this.camera.position;

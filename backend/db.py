@@ -6,10 +6,9 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("MEMORY_DATA_DIR", ROOT / "data"))
+from .paths import DATA_DIR
+
 DB_PATH = DATA_DIR / "memory.db"
 ATTACH_DIR = DATA_DIR / "attachments"
 
@@ -25,6 +24,7 @@ DEFAULT_SETTINGS = {
     "briefing_enabled": True,
     "theme": "blue",
     "notify_email": "",
+    "welcomed": False,  # first-run welcome shown
     "slot_positions": {},  # synapse index -> [x, y, z, nx, ny, nz] where the user dragged it (Arrange mode)  # where email notifications go; blank = the signed-in Microsoft account
     # quick links on the desktop wallpaper / left rail: web addresses, app links (ms-teams:) or file/folder paths
     "quick_links": [
@@ -190,6 +190,15 @@ def _migrate(con) -> None:
     cols = {r["name"] for r in con.execute("PRAGMA table_info(tasks)")}
     if "notify" not in cols:
         con.execute("ALTER TABLE tasks ADD COLUMN notify TEXT NOT NULL DEFAULT 'desktop'")
+    if not get_sync(con, "manual_links_to_dependencies"):
+        # linking two tasks now means "this one, then that one": convert hand-made links, older task first
+        for r in con.execute("SELECT a_id, b_id FROM links WHERE kind = 'manual'").fetchall():
+            first, then = sorted((r["a_id"], r["b_id"]))
+            reverse = con.execute("SELECT 1 FROM dependencies WHERE task_id = ? AND depends_on_id = ?", (first, then)).fetchone()
+            if not reverse:
+                con.execute("INSERT OR IGNORE INTO dependencies(task_id, depends_on_id) VALUES(?, ?)", (then, first))
+        con.execute("DELETE FROM links WHERE kind = 'manual'")
+        set_sync(con, "manual_links_to_dependencies", True)
     if not get_sync(con, "templates_seeded"):
         for t in BUILTIN_TEMPLATES:
             insert_template(con, t)

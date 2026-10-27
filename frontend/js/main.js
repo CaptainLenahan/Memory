@@ -12,7 +12,7 @@ import { quickLinkButtons } from './quicklinks.js';
 import { templateMeta, Templates } from './templates.js';
 import * as panel from './taskPanel.js';
 import { applyTheme, currentTheme, onThemeChange } from './themes.js';
-import { addDays, closePopover, debounce, fmtDate, h, icon, popover, REGION_VAR, renderMarkdown, toast, toastError, todayISO } from './ui.js';
+import { addDays, closePopover, debounce, fmtDate, h, icon, modal, popover, REGION_VAR, renderMarkdown, toast, toastError, todayISO } from './ui.js';
 
 // ?wallpaper: a brain-only view for a live desktop wallpaper (Lively). The wallpaper only gets mouse input, so quick
 //   actions happen in place and anything that needs typing opens a pop-up window.
@@ -154,6 +154,39 @@ initInbox({
   openSettings: () => (WALLPAPER ? openWindow({ window: 'app', view: 'settings' }) : openSettings()),
 });
 onInboxChange(() => (WALLPAPER ? renderWallpaperInbox() : renderListPane()));
+
+// ---------- first run + updates (full app only) ----------
+const WALLPAPER_URL = `${location.origin}/?wallpaper`;
+
+function showWelcome() {
+  const step = (n, title, text, button) => h('div', { class: 'welcome-step' }, h('span', { class: 'n' }, String(n)),
+    h('div', {}, h('div', { class: 'wt' }, title), h('div', { class: 'help' }, text), button || null));
+  const copy = h('button', { class: 'btn small', onclick: async () => {
+    try { await navigator.clipboard.writeText(WALLPAPER_URL); copy.textContent = 'Copied'; } catch { copy.textContent = WALLPAPER_URL; }
+  } }, 'Copy wallpaper address');
+  const done = () => api('/api/settings', { method: 'PUT', body: { welcomed: true } }).catch(() => {});
+  modal({
+    title: 'Welcome to Memory', wide: true, onClose: done,
+    body: h('div', { class: 'welcome' },
+      h('p', {}, 'Your tasks live on a brain: the most pressing ones sit on its synapses, logical work on the left, creative on the right, and everything else waits in the queue. Memory runs quietly in the background and starts with Windows.'),
+      step(1, 'Capture tasks', 'Type in the box on the right (or pick a template), then drag tasks onto synapses. Click a synapse for notes, steps, files and dates.'),
+      step(2, 'Connect Claude (optional)', 'Add an Anthropic API key to chat about your tasks, let AI sort your synapses, and turn emails into tasks.',
+        h('button', { class: 'btn small', onclick: () => { document.querySelector('.modal-backdrop')?.remove(); done(); openSettings(); } }, 'Open Settings')),
+      step(3, 'Connect Microsoft (optional)', 'Sign in to pull Planner tasks into your basket and see your Outlook inbox. Needs an Azure app registration; Settings and the README explain how.'),
+      step(4, 'Put the brain on your desktop (optional)', 'Install the free Lively Wallpaper app from the Microsoft Store, choose Add Wallpaper, and paste this address.', copy)),
+    actions: [{ label: 'Get started', kind: 'primary' }],
+  });
+}
+
+async function checkForUpdate() {
+  let v;
+  try { v = await api('/api/version'); } catch { return; }
+  if (!v.update_available || sessionStorage.getItem('memoryUpdateShown') === v.latest.version) return;
+  sessionStorage.setItem('memoryUpdateShown', v.latest.version);
+  toast(`Memory ${v.latest.version} is available (you have ${v.version}).`, {
+    action: 'Download', onAction: () => window.open(v.latest.download || v.latest.url, '_blank'), timeout: 20000,
+  });
+}
 
 // ---------- pop-up window: new-task form ----------
 function newTaskForm() {
@@ -388,5 +421,9 @@ if (!WALLPAPER && !POPUP) store.onEvent('planner', p => {
 store.refresh().then(() => {
   if (POPUP && location.hash === '#new') newTaskForm();
   else if (!WALLPAPER) openFromHash();
+  if (!WALLPAPER && !POPUP) {
+    if (!store.state.settings.welcomed && !store.state.tasks.length) showWelcome();
+    checkForUpdate();
+  }
 }).catch(toastError);
 connectEvents();

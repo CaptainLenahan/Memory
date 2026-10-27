@@ -24,6 +24,19 @@ export async function openSettings() {
   const autoSync = h('input', { type: 'checkbox', checked: s.planner_auto_sync });
   const plannerBox = h('div');
   const links = quickLinksEditor(s.quick_links || []);
+  const aboutBox = h('div', { class: 'status-line' }, 'Memory');
+  const checkUpdates = async () => {
+    aboutBox.replaceChildren('Checking…');
+    try {
+      const v = await api('/api/version');
+      aboutBox.replaceChildren(`Memory ${v.version}${v.frozen ? '' : ' (running from source)'} · `,
+        v.update_available
+          ? h('a', { href: v.latest.download || v.latest.url, target: '_blank', rel: 'noopener' }, `Download ${v.latest.version}`)
+          : v.latest ? 'up to date' : 'no published releases visible (the repository may be private)',
+        ' ', h('button', { class: 'btn small ghost', onclick: checkUpdates }, 'Check again'));
+    } catch (e) { aboutBox.replaceChildren(e.message); }
+  };
+  checkUpdates();
   const notifyEmail = h('input', { class: 'input', type: 'email', value: s.notify_email || '', placeholder: 'Your Microsoft account (default)' });
   const testStatus = h('span', { class: 'status-line' });
   const testBtn = h('button', { class: 'btn', onclick: async () => {
@@ -65,6 +78,8 @@ export async function openSettings() {
     h('div', { class: 'form-section' }, 'Quick links'),
     h('div', { class: 'help', style: { marginBottom: '8px' } }, 'Shown on the desktop wallpaper (bottom-left) and in the left rail. Use a web address, an app link like ms-teams:, or a folder/file path such as C:\\Reports or ~\\Downloads.'),
     links.el,
+    h('div', { class: 'form-section' }, 'About'),
+    aboutBox,
     h('div', { class: 'form-section' }, 'Notifications'),
     h('div', { class: 'form-grid' },
       h('label', {}, 'Email notifications to'), notifyEmail,

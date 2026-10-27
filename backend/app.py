@@ -13,14 +13,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+from .paths import ENV_FILE, FRONTEND
+
+load_dotenv(ENV_FILE)
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile  # noqa: E402
 from fastapi import Path as PathParam  # noqa: E402
 from fastapi.responses import FileResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from . import claude_service, db, desktop, engine, mail, notify, planner_sync, sysinfo, windows  # noqa: E402
+from . import claude_service, db, desktop, engine, mail, notify, paths, planner_sync, sysinfo, windows  # noqa: E402
 from .classifier import creative_score, region_for  # noqa: E402
 from .models import (  # noqa: E402
     ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, OpenBody, PlaceBody,
@@ -28,8 +30,8 @@ from .models import (  # noqa: E402
     ReorderBody, RethinkBody, SettingsUpdate, TaskCreate, TaskUpdate, UnplaceBody,
 )
 from .reminders import background_loop, bus  # noqa: E402
+from .version import REPO, __version__  # noqa: E402
 
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 MAX_UPLOAD = 50 * 1024 * 1024
 
 
@@ -88,6 +90,7 @@ def get_state():
         "current_week": engine.iso_week(today),
         "weeks": [{"week": w, "start": engine.week_start(w).isoformat()} for w in engine.next_weeks(today, 12)],
         "windows_open": windows.count(),
+        "version": __version__,
     }
 
 
@@ -677,6 +680,35 @@ def open_in_browser(body: OpenBody, request: Request):
     url = f"{base}?popup={pid}{frag}"
     bus.publish("popup", {"pid": pid})
     return {"ok": True, "url": url, "opened": desktop.open_window(url, "popup")}
+
+
+_latest_release: dict = {"at": 0.0, "data": None}
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in v.lstrip("v").split("-")[0].split(".") if x.isdigit())
+
+
+@app.get("/api/version")
+def version_info():
+    """This version, and the newest GitHub release (checked at most every 6 hours). A private repository's
+    releases aren't visible without signing in, so then `latest` is simply unknown."""
+    import time
+    import requests
+    if time.time() - _latest_release["at"] > 6 * 3600:
+        _latest_release["at"] = time.time()
+        try:
+            r = requests.get(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=8,
+                             headers={"Accept": "application/vnd.github+json", "User-Agent": f"Memory/{__version__}"})
+            if r.ok:
+                d = r.json()
+                setup = next((a["browser_download_url"] for a in d.get("assets", []) if a["name"].lower().endswith(".exe")), None)
+                _latest_release["data"] = {"version": d["tag_name"].lstrip("v"), "url": d["html_url"], "download": setup}
+        except requests.RequestException:
+            pass
+    latest = _latest_release["data"]
+    newer = bool(latest and _version_tuple(latest["version"]) > _version_tuple(__version__))
+    return {"version": __version__, "latest": latest, "update_available": newer, "frozen": paths.FROZEN}
 
 
 @app.get("/api/system")

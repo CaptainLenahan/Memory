@@ -18,34 +18,35 @@ A local task, notes and planning app built around a see-through, 3D electronic b
 - **Arrange.** Click **Arrange** above the brain and drag synapses to new spots. Each one slides along its own hemisphere, so its logical/creative side never changes. Positions are saved, the wallpaper uses them too, and **Reset layout** puts them back.
 - **Colour themes.** Settings → *Colour theme* re-tints the whole interface and the brain: Neural blue, Teal, Synapse green, Gold, Ember orange, Coral red, Violet or Graphite. The change applies instantly in every open window, including the desktop wallpaper. Logical/creative and due-date colours never change, so they keep their meaning.
 
-## Run it
+## Install
 
-Double-click `start.bat`, or from a terminal:
+Download **Memory-Setup-x.y.z.exe** from the repository's **Releases** page and run it. No admin rights or Python are needed.
+
+- **Where it goes:** the app installs to `%LOCALAPPDATA%\Programs\Memory` and adds **Memory** to the Start menu.
+- **Auto-start:** Memory starts silently when you sign in, through a Task Scheduler task that also restarts it within 5 minutes if it ever stops. This is a ticked option in the installer.
+- **Your data** lives in `%LOCALAPPDATA%\Memory` (tasks, notes, files, settings, `server.log`), so updates never touch it. Uninstalling, from Windows Settings → Apps, asks whether to delete it too.
+- **Updates:** run the newer installer, which replaces the app in place. Memory shows a notice when a new release is out. While the repository is private, GitHub hides its releases from that check, so it stays quiet until the repository is public.
+- **Security warning:** the installer isn't code-signed, so Windows may show "Windows protected your PC" the first time. Choose **More info → Run anyway**.
+
+A portable zip is also attached to each release. Unzip it anywhere and run `Memory.exe --open`.
+
+## Run from source
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
 ```bash
-python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+python launcher.pyw --open
 ```
 
-Then open http://localhost:8765. Everything is stored locally in `data/`: `memory.db` holds your tasks and `attachments/` holds files and screenshots.
+That starts the server at http://localhost:8765 and opens it in your browser. From source, data is stored in `data/` next to the code.
 
-### Start automatically when you sign in
-
-Memory is a small local server (FastAPI on `http://localhost:8765`, only reachable from your own PC) plus the web pages it serves. To have it always running:
+To start it when you sign in, run the command below. It sets up the same Task Scheduler task as the installer plus a Start menu shortcut; add `-Remove` to undo it. Server output goes to `data/server.log`.
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\startup.ps1
 ```
-
-This needs no admin rights. It sets up:
-
-- **A Task Scheduler task named "Memory".** It starts the server silently 20 seconds after you sign in, with no console window, then checks every 5 minutes and starts it again if it has stopped. If your organisation blocks scheduled tasks, the script falls back to a Startup-folder shortcut.
-- **A "Memory" shortcut in the Start menu.** It opens the app in your browser and starts the server first if needed. Pin it to the taskbar if you like.
-
-Server output goes to `data/server.log`. To see or pause the task, open Task Scheduler and find **Memory** in the library. To remove everything, add `-Remove` to the command above.
 
 ### Use the brain as your desktop wallpaper
 
@@ -115,5 +116,21 @@ Once you're signed in:
 python -m pytest tests
 ```
 
-- `backend/`: FastAPI app (`app.py`), SQLite storage (`db.py`), scheduling engine (`engine.py`), classifier, Claude service, Planner sync and the reminder/background loop.
-- `frontend/`: a no-build ES-module app. The Three.js brain is in `js/brain3d.js`, the task drawer in `js/taskPanel.js` and the dashboard in `js/dashboard.js`. Three.js r170 is vendored in `frontend/vendor/`.
+- `backend/`: FastAPI app (`app.py`), SQLite storage (`db.py`), scheduling engine (`engine.py`), classifier, Claude service, Planner/Outlook sync, notifications, the reminder/background loop and the launcher (`launcher.py`, the entry point `Memory.exe` is built from). `paths.py` decides where data lives, and `version.py` holds the version number.
+- `frontend/`: a no-build ES-module app. The Three.js brain is in `js/brain3d.js`, the task pop-up in `js/taskPanel.js` and the dashboard in `js/dashboard.js`. Three.js r170 is vendored in `frontend/vendor/`.
+- `packaging/memory.iss`: the Inno Setup installer script. `scripts/build.ps1` builds the app with PyInstaller, plus the portable zip and installer, into `dist/`.
+- `.github/workflows/`: `tests.yml` runs the tests on every push to `main`; `release.yml` builds and publishes a release when a version tag is pushed.
+
+### Shipping an update
+
+1. Make your changes, run the tests, and commit them.
+2. Run one command. It bumps the version, tags it and pushes:
+   ```bash
+   powershell -ExecutionPolicy Bypass -File scripts\release.ps1
+   ```
+   Use `-Bump minor` for new features or `-Bump major` for big changes; the default is a patch (1.0.0 → 1.0.1).
+3. GitHub Actions runs the tests, builds `Memory-Setup-x.y.z.exe` and publishes the release. This takes about 5 minutes; watch it in the repository's **Actions** tab. People with Memory installed see the update notice once the repository is public.
+
+To try a build locally first, run `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`. It needs Inno Setup 6 for the installer step: `winget install JRSoftware.InnoSetup`.
+
+Third-party licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

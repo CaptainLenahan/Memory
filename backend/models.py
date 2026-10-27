@@ -98,6 +98,7 @@ class SettingsUpdate(BaseModel):
     theme: Optional[Literal["blue", "teal", "green", "gold", "orange", "red", "purple", "silver"]] = None
     quick_links: Optional[list[QuickLink]] = Field(default=None, max_length=24)
     slot_positions: Optional[dict[str, list[float]]] = None
+    welcomed: Optional[bool] = None
     notify_email: Optional[str] = Field(default=None, max_length=254, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 

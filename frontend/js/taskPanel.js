@@ -575,14 +575,17 @@ function pickTask(anchor, title, exclude, onPick) {
 }
 
 // ---------- links ----------
+// Linking means "this task, then that one": the linked task becomes the next step (1 → 2), shown in Sequence.
 function linksCard(t) {
-  const items = t.links.map(l => h('div', { class: 'link-item', onclick: e => { if (!e.target.closest('button')) open(l.id); } },
-    icon('link'), h('span', { class: 'lt' }, l.title), h('span', { class: 'kind' }, l.kind === 'auto' ? 'related' : 'linked'),
-    l.kind === 'manual' ? h('button', { title: 'Unlink', onclick: async () => { try { apply(await Tasks.unlink(t.id, l.id)); } catch (e) { toastError(e); } } }, icon('x')) : null));
-  const addBtn = h('button', { class: 'btn small act', onclick: e => linkPicker(e.currentTarget) }, icon('plus'), 'Link task');
+  const items = t.links.filter(l => l.kind === 'auto').map(l => h('div', { class: 'link-item', onclick: () => open(l.id) },
+    icon('link'), h('span', { class: 'lt' }, l.title), h('span', { class: 'kind' }, 'related')));
+  const addBtn = h('button', { class: 'btn small act', title: 'Link a task that comes after this one', onclick: e => linkPicker(e.currentTarget) }, icon('plus'), 'Link next task');
   return h('div', { class: 'card' },
     h('div', { class: 'card-title' }, 'Connected synapses', addBtn),
-    h('div', { class: 'card-body' }, items.length ? items : h('div', { class: 'status-line' }, 'Related tasks connect automatically by shared words and tags. Linked tasks on the brain are joined by glowing axons.')));
+    h('div', { class: 'card-body' },
+      h('div', { class: 'status-line', style: { marginBottom: items.length ? '6px' : 0 } },
+        'Linking a task makes it the next step after this one: they become 1 → 2, with impulses flowing toward the next task on the brain. Related tasks below connect automatically by shared words and tags.'),
+      items));
 }
 
 function linkPicker(anchor) {
@@ -595,7 +598,11 @@ function linkPicker(anchor) {
     const opts = store.state.tasks.filter(x => x.id !== task.id && !linked.has(x.id) && x.status !== 'done' && x.title.toLowerCase().includes(q)).slice(0, 12);
     listEl.replaceChildren(...(opts.length ? opts.map(x => h('button', { class: 'opt', onclick: async () => {
       closePopover();
-      try { apply(await Tasks.link(task.id, x.id)); } catch (e) { toastError(e); }
+      try {
+        await Tasks.addDependency(x.id, task.id);
+        apply(await Tasks.get(task.id));
+        toast(`“${x.title}” is now the next step after “${task.title}”`);
+      } catch (e) { toastError(e); }
     } }, h('span', { class: 't' }, x.title), h('span', { class: 's' }, x.status))) : [h('div', { class: 'none' }, 'No matching tasks')]));
   };
   search.addEventListener('input', fill);
