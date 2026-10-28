@@ -632,6 +632,7 @@ def wallpaper_restart():
     if not s.get("desktop_wallpaper"):
         raise HTTPException(400, "Turn on the desktop wallpaper in Settings first.")
     wallpaper.start(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))
+    wallpaper.restart()
     return {"ok": True}
 
 

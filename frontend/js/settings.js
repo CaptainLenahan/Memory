@@ -104,8 +104,10 @@ export async function openSettings() {
       ram_slots: Number(ram.value), weekly_capacity_hours: Number(cap.value), auto_fill: autoFill.checked,
       model: model.value, azure_client_id: clientId.value.trim(), azure_tenant_id: tenant.value.trim() || 'organizations',
       planner_auto_sync: autoSync.checked, quick_links: links.value(), notify_email: notifyEmail.value.trim(),
-      desktop_wallpaper: wallpaperOn.checked, wallpaper_screens: wallpaperScreens.value,
     };
+    // only when changed here: a dialog opened earlier must not switch the wallpaper back off (or on)
+    if (wallpaperOn.checked !== !!s.desktop_wallpaper) values.desktop_wallpaper = wallpaperOn.checked;
+    if (wallpaperScreens.value !== (s.wallpaper_screens || 'all')) values.wallpaper_screens = wallpaperScreens.value;
     if (key.value.trim()) values.anthropic_api_key = key.value.trim();
     try {
       await mutate(api('/api/settings', { method: 'PUT', body: values }));

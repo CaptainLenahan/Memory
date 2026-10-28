@@ -286,8 +286,9 @@ function lockForWindows(n) {
   n = n || 0;
   if (n === windowsOpen) return;
   windowsOpen = n;
-  brain.setLocked(n > 0);
-  brain.setPaused('windows', n > 0); // held still and mostly covered: no need to keep drawing
+  // Under Lively, mouse movement keeps arriving while you drag a Memory window around, so the brain's controls lock
+  // (it keeps animating). Memory's own wallpaper only passes the mouse through over the bare desktop: no lock needed.
+  brain.setLocked(n > 0 && SCREEN == null);
   if (n > 0) closePopover();
   renderWallpaperHud();
 }
@@ -310,7 +311,7 @@ function renderWallpaperHud() {
   const overdue = open.filter(t => t.due_at.slice(0, 10) < today).length;
   const soon = open.filter(t => t.due_at.slice(0, 10) >= today && t.due_at.slice(0, 10) <= weekEnd).length;
   line.replaceChildren(...[
-    windowsOpen ? h('div', { class: 'wp-lock' }, 'Brain held still while a Memory window is open') : null,
+    windowsOpen && SCREEN == null ? h('div', { class: 'wp-lock' }, 'Rotation paused while a Memory window is open') : null,
     overdue ? h('span', { class: 'bad' }, `${overdue} overdue`) : null,
     overdue && soon ? ' · ' : null,
     soon ? `${soon} due this week` : null,

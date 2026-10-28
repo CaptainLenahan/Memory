@@ -86,6 +86,13 @@ def main(argv: list[str] | None = None) -> None:
     sys.stdout = sys.stderr = open(log_path, "a", buffering=1, encoding="utf-8")
     print(f"\n--- Memory {__version__} starting {time.strftime('%Y-%m-%d %H:%M:%S')} on http://localhost:{port} ---")
 
+    import logging
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
+    memory_log = logging.getLogger("memory")
+    memory_log.addHandler(handler)
+    memory_log.setLevel(logging.INFO)
+
     if want_open:
         threading.Thread(target=_open_when_ready, args=(port,), daemon=True).start()
     import uvicorn

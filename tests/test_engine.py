@@ -112,3 +112,40 @@ def test_dependency_sequence_numbers_a_chain():
     assert all(seq[i]["of"] == 3 and seq[i]["goal"] == 4 for i in (1, 2, 3, 4))
     assert seq[2]["waiting"] == 1 and seq[4]["waiting"] == 1 and 9 not in seq
     assert engine.creates_cycle(pairs, 1, 4) and not engine.creates_cycle(pairs, 4, 9)
+
+
+def test_wallpaper_supervisor_retries_steps_aside_and_recovers(monkeypatch):
+    import threading
+    import time
+    from backend import wallpaper as wp
+    if not wp.WINDOWS:
+        return
+    events, lively = [], {"on": False}
+
+    class FakeHost:
+        attempts = 0
+        def __init__(self, port, screens):
+            self.problem, self.alive = "", True
+        def start_and_wait(self):
+            FakeHost.attempts += 1
+            events.append(("start", FakeHost.attempts))
+            return FakeHost.attempts >= 3          # the first two tries fail (e.g. Edge slow at sign-in)
+        def healthy(self):
+            return self.alive
+        def stop(self):
+            events.append(("stop",))
+    monkeypatch.setattr(wp, "_Host", FakeHost)
+    monkeypatch.setattr(wp, "lively_running", lambda: lively["on"])
+    monkeypatch.setattr(wp, "CHECK_EVERY", 0.02)
+    monkeypatch.setattr(wp, "MAX_BACKOFF", 0.05)
+    wp.start(8765, "all")
+    deadline = time.time() + 5
+    while FakeHost.attempts < 3 and time.time() < deadline:
+        time.sleep(0.02)
+    assert FakeHost.attempts == 3                    # kept retrying until it worked
+    lively["on"] = True; time.sleep(0.2)
+    assert ("stop",) in events and "Lively" in wp.status()["reason"]
+    lively["on"] = False; time.sleep(0.3)
+    assert FakeHost.attempts >= 4                    # came back once Lively closed
+    wp.stop()
+    assert not wp.status()["running"]

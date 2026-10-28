@@ -6,8 +6,10 @@ How it works (Windows only, plain Win32 through ctypes):
   wallpaper (WorkerW). Both the newer "raised desktop" layout (Windows 11 24H2+) and the classic one are handled.
 - The desktop eats mouse input, so a low-level mouse hook forwards moves, left clicks and the wheel over the bare
   desktop to the window underneath. A drag that starts on the desktop keeps forwarding until the button is released.
-- A watcher pauses a screen's brain while a maximised or full-screen window covers it, gives way if Lively
-  Wallpaper is running, and rebuilds the wallpaper if Explorer restarts.
+- A watcher pauses a screen's brain while a maximised or full-screen window covers it.
+- A supervisor keeps it alive while the setting is on: it (re)builds the wallpaper whenever it's missing (sign-in
+  before Edge or Explorer are ready, Explorer restarts, a window closing, screens added/removed/rearranged, waking
+  from sleep), retrying with a growing delay, and steps aside while Lively Wallpaper runs, coming back when it exits.
 """
 from __future__ import annotations
 
@@ -28,8 +30,12 @@ log = logging.getLogger("memory.wallpaper")
 WINDOWS = sys.platform == "win32"
 
 _lock = threading.Lock()
-_host: "_Host | None" = None
 _status = {"running": False, "screens": 0, "reason": "off"}
+_want = {"on": False, "port": 8765, "screens": "all", "rebuild": False}
+_wake = threading.Event()
+_supervisor: threading.Thread | None = None
+CHECK_EVERY = 4.0
+MAX_BACKOFF = 60.0
 
 
 def status() -> dict:
@@ -37,25 +43,77 @@ def status() -> dict:
 
 
 def start(port: int, screens: str = "all") -> None:
-    """Start (or restart) the wallpaper in the background. Safe to call repeatedly."""
-    global _host
+    """Turn the wallpaper on (or apply new options). Returns at once; the supervisor does the work."""
+    global _supervisor
     if not WINDOWS:
         _status.update(running=False, reason="Windows only")
         return
     with _lock:
-        if _host:
-            _host.stop()
-        _host = _Host(port, screens)
-        _host.start()
+        changed = _want["on"] and (_want["port"], _want["screens"]) != (port, screens)
+        _want.update(on=True, port=port, screens=screens, rebuild=_want["rebuild"] or changed)
+        if not (_supervisor and _supervisor.is_alive()):
+            _supervisor = threading.Thread(target=_supervise, name="memory-wallpaper-supervisor", daemon=True)
+            _supervisor.start()
+    _wake.set()
 
 
-def stop() -> None:
-    global _host
+def restart() -> None:
+    _want["rebuild"] = True
+    _wake.set()
+
+
+def stop(wait: bool = True) -> None:
     with _lock:
-        if _host:
-            _host.stop()
-            _host = None
+        _want["on"] = False
+        sup = _supervisor
+    _wake.set()
+    if wait and sup and sup is not threading.current_thread():
+        sup.join(timeout=8)
     _status.update(running=False, screens=0, reason="off", covered=[])
+
+
+def _supervise() -> None:
+    host: _Host | None = None
+    backoff, next_try = 0.0, 0.0
+    try:
+        while _want["on"]:
+            if _want["rebuild"]:
+                _want["rebuild"] = False
+                if host:
+                    host.stop()
+                    host = None
+                backoff, next_try = 0.0, 0.0
+            if lively_running():
+                if host:
+                    log.info("Lively Wallpaper is running: stepping aside")
+                    host.stop()
+                    host = None
+                _status.update(running=False, screens=0, reason="Lively Wallpaper is running, so Memory leaves the desktop "
+                               "to it (Memory takes over again when Lively closes)", covered=[])
+            elif not (host and host.healthy()):
+                if host:
+                    log.info("wallpaper needs rebuilding (%s)", host.problem or "stopped")
+                    host.stop()
+                    host = None
+                if time.monotonic() >= next_try:
+                    host = _Host(_want["port"], _want["screens"])
+                    if host.start_and_wait():
+                        backoff = 0.0
+                    else:
+                        backoff = min(MAX_BACKOFF, backoff * 2 or 5.0)
+                        next_try = time.monotonic() + backoff
+                        log.warning("wallpaper didn't start (%s); retrying in %.0f s", _status.get("reason"), backoff)
+                        _status["reason"] = f"{_status.get('reason')}; retrying in {backoff:.0f} s"
+                        host.stop()
+                        host = None
+            _wake.wait(CHECK_EVERY)
+            _wake.clear()
+    except Exception:
+        log.exception("wallpaper supervisor crashed")
+    finally:
+        if host:
+            host.stop()
+        _status.update(running=False, screens=0, covered=[])
 
 
 def lively_running() -> bool:
@@ -237,11 +295,34 @@ class _Host:
         self._last_hwnd = None
         self._last_is_desktop = False
         self.parent = self.below = None
+        self.monitors: list = []
+        self.problem = ""
+        self.attached = threading.Event()
+        self.ok = False
 
     # ----- lifecycle -----
-    def start(self) -> None:
+    def start_and_wait(self, timeout: float = 60) -> bool:
+        """Build the wallpaper; True once every screen's window is in place."""
         self.thread = threading.Thread(target=self._run, name="memory-wallpaper", daemon=True)
         self.thread.start()
+        self.attached.wait(timeout)
+        return self.ok
+
+    def healthy(self) -> bool:
+        """Still running, every window still exists, and the screens haven't changed."""
+        if not (self.thread and self.thread.is_alive() and self.ok):
+            self.problem = "host stopped"
+        elif not all(user32.IsWindow(w["hwnd"]) for w in self.windows):
+            self.problem = "a wallpaper window closed (Explorer restart?)"
+        elif self._screens() != self.monitors:
+            self.problem = "screens changed"
+        else:
+            self.problem = ""
+        return not self.problem
+
+    def _screens(self) -> list:
+        mons = _monitors()
+        return mons[:1] if self.screens == "primary" else mons
 
     def stop(self) -> None:
         self.stopping.set()
@@ -254,10 +335,9 @@ class _Host:
         user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # per-monitor aware: real pixels everywhere
         self.thread_id = kernel32.GetCurrentThreadId()
         try:
-            if lively_running():
-                _status.update(running=False, screens=0, reason="Lively Wallpaper is running, so Memory leaves the desktop to it")
-                return
-            if not self._attach():
+            self.ok = self._attach()
+            self.attached.set()
+            if not self.ok:
                 return
             self._hook_proc = HOOKPROC(self._on_mouse)
             self._hook = user32.SetWindowsHookExW(14, self._hook_proc, None, 0)  # WH_MOUSE_LL
@@ -269,6 +349,7 @@ class _Host:
             log.exception("wallpaper host failed")
             _status.update(running=False, reason="failed to start (see server.log)")
         finally:
+            self.attached.set()
             if self._hook:
                 user32.UnhookWindowsHookEx(self._hook)
             for w in self.windows:
@@ -283,9 +364,7 @@ class _Host:
         if not exe:
             _status.update(running=False, reason="needs Microsoft Edge or Google Chrome")
             return False
-        monitors = _monitors()
-        if self.screens == "primary":
-            monitors = monitors[:1]
+        monitors = self.monitors = self._screens()
         parent, below, layout = _desktop_layer()
         self.parent, self.below = parent, below
         profile = DATA_DIR / "wallpaper-profile"
@@ -315,7 +394,7 @@ class _Host:
             self._embed(hwnd, parent, below, (l, t, r, b))
             self.windows.append({"hwnd": hwnd, "render": _render_widget(hwnd), "rect": (l, t, r, b), "index": i})
         self._keep_below_icons()
-        ok = bool(self.windows)
+        ok = len(self.windows) == len(monitors)  # all screens, or try again
         _status.update(running=ok, screens=len(self.windows), layout=layout,
                        reason="on" if ok else "the wallpaper window didn't open", covered=[])
         log.info("wallpaper on %d screen(s), %s desktop", len(self.windows), layout)
@@ -446,22 +525,11 @@ class _Host:
     def _watch(self) -> None:
         user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
         covered_before: list[int] = []
-        lively_check = 0.0
         while not self.stopping.wait(1.5):
             if not all(user32.IsWindow(w["hwnd"]) for w in self.windows):
-                log.info("wallpaper window went away (Explorer restart?); rebuilding")
-                user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
-                threading.Timer(3, lambda: start(self.port, self.screens)).start()
-                return
+                return  # the supervisor notices and rebuilds
             self._keep_below_icons()
             self._close_strays()
-            if time.monotonic() - lively_check > 10:
-                lively_check = time.monotonic()
-                if lively_running():
-                    _status.update(reason="Lively Wallpaper started, so Memory gave the desktop to it")
-                    self.stopping.set()
-                    user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
-                    return
             fg = user32.GetForegroundWindow()
             covered = []
             if fg and not self._is_desktop(fg) and user32.IsWindowVisible(fg):
