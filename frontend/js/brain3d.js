@@ -599,8 +599,7 @@ export class Brain {
         window.removeEventListener('pointerup', up);
         this.controls.enabled = !this.locked;
         if (dragging) return;
-        if (syn.task) this.handlers.onSelect?.(syn.task.id, ev);
-        else this.handlers.onEmptySlot?.(syn.index, ev);
+        this.click(syn, ev);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
@@ -649,6 +648,27 @@ export class Brain {
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
+  }
+
+  // A second click on the same synapse within 300 ms is a double-click (create a task there). A single click waits
+  // out that window first, so a double-click never also opens the single-click view.
+  click(syn, ev) {
+    const now = performance.now();
+    const pending = this.pendingClick;
+    if (pending?.syn === syn && now - pending.at < 300) {
+      clearTimeout(pending.timer);
+      this.pendingClick = null;
+      this.handlers.onSynapseDoubleClick?.(syn.index, syn.task, ev);
+      return;
+    }
+    if (pending) { clearTimeout(pending.timer); pending.fire(); }  // a click on another synapse: settle the first one now
+    const fire = () => {
+      this.pendingClick = null;
+      if (syn.task) this.handlers.onSelect?.(syn.task.id, ev);
+      else this.handlers.onEmptySlot?.(syn.index, ev);
+    };
+    if (!this.handlers.onSynapseDoubleClick) { fire(); return; }
+    this.pendingClick = { syn, at: now, fire, timer: setTimeout(fire, 300) };
   }
 
   // Keep picking correct even when no frame has rendered yet (e.g. a background tab).

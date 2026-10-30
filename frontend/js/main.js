@@ -47,6 +47,8 @@ const brain = POPUP ? new Proxy({}, { get: () => () => null }) : new Brain(docum
   onSelect: (id, ev) => (WALLPAPER ? quickCard(id, ev) : panel.open(id, { x: ev.clientX, y: ev.clientY })),
   onEmptySlot: (index, ev) => slotPicker(index, ev),
   onSynapseDragStart: (task, ev) => startSynapseDrag(task, ev),
+  // double-click: a new task on an empty synapse, or the next step after the task on a full one
+  onSynapseDoubleClick: (index, task) => openNewTask(task ? { after: task.id } : { slot: index }),
   onSynapseMoved: (index, pos) => saveSlotPositions({ ...(store.state.settings.slot_positions || {}), [index]: pos }),
 }, WALLPAPER ? { fps: [30, 15], maxPixelRatio: 1, pixelBudget: 1.6e6 } : {});
 window.memoryBrain = brain; // handy for debugging in devtools
@@ -57,7 +59,7 @@ function slotPicker(index, ev) {
     ? candidates.map(t => h('button', { class: 'opt', onclick: () => { closePopover(); dropOnSlot(t.id, index); } },
         h('i', { class: 'region-dot', style: `--c:${REGION_VAR[t.region]}` }), h('span', { class: 't' }, t.title), h('span', { class: 's' }, t.status === 'basket' ? 'basket' : 'queue')))
     : [h('div', { class: 'none' }, WALLPAPER ? 'Basket and queue are empty.' : 'Basket and queue are empty. Add a task in the list on the right.')];
-  if (WALLPAPER) items.push(h('button', { class: 'opt', onclick: () => { closePopover(); openNewTaskWindow(); } }, h('span', { class: 't' }, '+ New task…')));
+  items.push(h('button', { class: 'opt', onclick: () => { closePopover(); openNewTask({ slot: index }); } }, h('span', { class: 't' }, '+ New task here…')));
   const side = store.state.slots.find(s => s.index === index)?.side;
   const where = side < 0 ? ' · logical side' : side > 0 ? ' · creative side' : '';
   popover({ x: ev.clientX, y: ev.clientY }, [h('h4', {}, `Fill synapse ${index + 1}${where}`), ...items]);
@@ -189,30 +191,60 @@ async function checkForUpdate() {
   });
 }
 
-// ---------- pop-up window: new-task form ----------
-function newTaskForm() {
-  document.title = 'New task · Memory';
+// ---------- new-task form: modal in the app, full window in a pop-up; can target a synapse or follow a task ----------
+// opts.slot: put the new task on this synapse.  opts.after: make it the next step after this task.
+function newTaskContent(opts, onDone) {
+  const after = opts.after != null ? store.task(opts.after) : null;
+  const heading = opts.slot != null ? `New task on synapse ${opts.slot + 1}` : after ? 'New next step' : 'New task';
+  const help = opts.slot != null ? 'Enter puts it on this synapse and opens it for steps, notes, files and dates.'
+    : after ? `It comes right after “${after.title}” in its sequence. Enter creates it and opens it.`
+      : 'Enter adds it to your basket and opens it for steps, notes, files and dates.';
   const input = h('input', { class: 'input', placeholder: 'What needs doing?', maxlength: 500, 'aria-label': 'New task' });
-  const screen = h('div', { class: 'new-task-screen' }, h('div', { class: 'new-task-card' },
-    h('h2', {}, 'New task'), input,
-    h('div', { class: 'help' }, 'Enter adds it to your basket and opens it for steps, notes, files and dates. Esc closes.')));
+  let busy = false;
+  const finish = async makeTask => {
+    if (busy) return;
+    busy = true;
+    try {
+      const t = await makeTask();
+      if (opts.slot != null) await Tasks.place(t.id, opts.slot);
+      if (opts.after != null) await Tasks.addDependency(t.id, opts.after);
+      await store.refresh();
+      onDone(t);
+    } catch (err) { toastError(err); busy = false; }
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && input.value.trim()) finish(() => Tasks.create({ title: input.value.trim() }));
+  });
   const chips = h('div', { class: 'tpl-chips' });
   Templates.list().then(list => chips.replaceChildren(...(list.length ? [h('div', { class: 'help' }, 'Or start from a template:')] : []),
-    ...list.map(t => h('button', { class: 'tpl-chip', title: templateMeta(t), onclick: async () => {
-      try { const task = await mutate(Templates.use(t.id, input.value.trim())); screen.remove(); panel.open(task.id); } catch (err) { toastError(err); }
-    } }, icon('template'), t.name)))).catch(() => {});
-  screen.firstChild.append(chips);
-  input.addEventListener('keydown', async e => {
-    if (e.key === 'Escape') window.close();
-    if (e.key !== 'Enter' || !input.value.trim()) return;
-    try {
-      const t = await mutate(Tasks.create({ title: input.value.trim() }));
-      screen.remove();
-      panel.open(t.id);
-    } catch (err) { toastError(err); }
-  });
+    ...list.map(t => h('button', { class: 'tpl-chip', title: templateMeta(t), onclick: () => finish(() => Templates.use(t.id, input.value.trim())) },
+      icon('template'), t.name)))).catch(() => {});
+  return { heading, input, body: [input, h('div', { class: 'help' }, help), chips], create: () => input.value.trim() && finish(() => Tasks.create({ title: input.value.trim() })) };
+}
+
+function openNewTask(opts = {}) {
+  if (WALLPAPER) {
+    openWindow({ new: true, window: 'popup', new_slot: opts.slot ?? null, new_after: opts.after ?? null });
+    return;
+  }
+  let dialog;
+  const f = newTaskContent(opts, t => { dialog.close(); panel.open(t.id); });
+  dialog = modal({ title: f.heading, body: h('div', { class: 'new-task-modal' }, f.body),
+    actions: [{ label: 'Cancel' }, { label: 'Create', kind: 'primary', onClick: () => { f.create(); return false; } }] });
+  setTimeout(() => f.input.focus(), 50);
+}
+
+// pop-up window opened from the wallpaper: /?popup=…#new[&slot=N][&after=ID]
+function newTaskForm() {
+  const hp = new URLSearchParams(location.hash.slice(1));
+  const opts = { slot: hp.has('slot') ? Number(hp.get('slot')) : null, after: hp.has('after') ? Number(hp.get('after')) : null };
+  const f = newTaskContent(opts, t => { screen.remove(); panel.open(t.id); });
+  document.title = `${f.heading} · Memory`;
+  const screen = h('div', { class: 'new-task-screen' }, h('div', { class: 'new-task-card' }, h('h2', {}, f.heading), ...f.body,
+    h('div', { class: 'help' }, 'Esc closes.')));
+  f.input.addEventListener('keydown', e => { if (e.key === 'Escape') window.close(); });
   document.body.append(screen);
-  input.focus();
+  f.input.focus();
 }
 
 // Arrange mode: drag synapses around the brain; positions are saved in settings so the wallpaper uses them too.
@@ -423,7 +455,7 @@ if (!WALLPAPER && !POPUP) store.onEvent('planner', p => {
 });
 
 store.refresh().then(() => {
-  if (POPUP && location.hash === '#new') newTaskForm();
+  if (POPUP && location.hash.startsWith('#new')) newTaskForm();
   else if (!WALLPAPER) openFromHash();
   if (!WALLPAPER && !POPUP) {
     if (!store.state.settings.welcomed && !store.state.tasks.length) showWelcome();

@@ -352,3 +352,15 @@ def test_browser_sign_in_and_error_help(monkeypatch):
         st = client.get("/api/planner/status").json()
         assert "http://localhost" in st["error"] and "AADSTS50011" in st["error"] and st["pending"] is None
     planner_sync._flow_error = None
+
+
+def test_open_new_task_popup_for_a_synapse(monkeypatch):
+    monkeypatch.setattr("backend.app.desktop.open_window", lambda url, kind="popup": "window")
+    with TestClient(app) as client:
+        url = client.post("/api/open", json={"new": True, "window": "popup", "new_slot": 2}).json()["url"]
+        assert url.endswith("#new&slot=2")
+        t = make(client, "Lead task")
+        url = client.post("/api/open", json={"new": True, "window": "popup", "new_after": t["id"]}).json()["url"]
+        assert url.endswith(f"#new&after={t['id']}")
+        assert client.post("/api/open", json={"new": True, "window": "popup", "new_slot": 99}).status_code == 422
+        client.delete(f"/api/tasks/{t['id']}")

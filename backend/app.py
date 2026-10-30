@@ -696,7 +696,8 @@ def open_in_browser(body: OpenBody, request: Request):
             if not db.get_task(con, body.task_id):
                 raise HTTPException(404, "Task not found")
     base = f"http://localhost:{request.url.port or 8765}/"
-    frag = f"#task={body.task_id}" if body.task_id is not None else "#new" if body.new else f"#{body.view}" if body.view else ""
+    new = "#new" + (f"&slot={body.new_slot}" if body.new_slot is not None else "") + (f"&after={body.new_after}" if body.new_after is not None else "")
+    frag = f"#task={body.task_id}" if body.task_id is not None else new if body.new else f"#{body.view}" if body.view else ""
     if body.window == "tab":
         url = base + frag
         webbrowser.open(url)

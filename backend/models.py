@@ -173,3 +173,5 @@ class OpenBody(BaseModel):
     new: bool = False                                    # open the new-task form
     window: Literal["tab", "popup", "app"] = "tab"       # popup/app: chromeless window (used by the wallpaper)
     view: Optional[Literal["settings"]] = None           # open the app with Settings showing
+    new_slot: Optional[int] = Field(default=None, ge=0, le=14)  # new task goes onto this synapse
+    new_after: Optional[int] = None                      # new task is the next step after this task
