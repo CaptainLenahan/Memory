@@ -20,15 +20,16 @@ load_dotenv(ENV_FILE)
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile  # noqa: E402
 from fastapi import Path as PathParam  # noqa: E402
-from fastapi.responses import FileResponse, StreamingResponse  # noqa: E402
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
-from . import claude_service, db, desktop, engine, mail, notify, paths, planner_sync, sysinfo, wallpaper, windows  # noqa: E402
+from . import claude_service, db, desktop, engine, mail, notify, paths, planner_push, planner_sync, sysinfo, wallpaper, windows  # noqa: E402
 from .classifier import creative_score, region_for  # noqa: E402
 from .models import (  # noqa: E402
     ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, LoginBody, OpenBody, PlaceBody,
     TemplateBody, TemplateFromTask, TemplateUse,
-    ReorderBody, RethinkBody, SettingsUpdate, TaskCreate, TaskUpdate, UnplaceBody,
+    PlannerPushBody, ReorderBody, RethinkBody, SettingsUpdate, TaskCreate, TaskUpdate, UnplaceBody,
 )
 from .reminders import background_loop, bus  # noqa: E402
 from .version import REPO, __version__  # noqa: E402
@@ -53,7 +54,40 @@ async def lifespan(app: FastAPI):
 
 
 log = logging.getLogger("memory.app")
-app = FastAPI(title="Memory", lifespan=lifespan)
+app = FastAPI(title="Memory", version=__version__, lifespan=lifespan)
+
+# ---------- access guard ----------
+# Memory listens on 127.0.0.1 and has no login. Two things could still reach it from outside: web pages in your
+# browser (they can send requests to localhost) and a tunnel that forwards the port so a cloud flow can push Planner
+# tasks. So: requests from other websites are refused, and anything arriving through a tunnel/proxy (a non-local Host,
+# or forwarding headers) may only use POST /api/planner/sync, which needs the sync token.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"} | {
+    h.strip() for h in os.environ.get("MEMORY_EXTRA_LOCAL_HOSTS", "").split(",") if h.strip()}
+_FORWARDED = ("x-forwarded-for", "x-forwarded-host", "forwarded", "x-original-host", "x-real-ip")
+_REMOTE_OK = {("POST", "/api/planner/sync")}
+
+
+def _hostname(netloc: str) -> str:
+    netloc = netloc.strip().lower()
+    if netloc.startswith("["):
+        return netloc.split("]")[0] + "]"
+    return netloc.rsplit(":", 1)[0] if netloc.count(":") == 1 else netloc
+
+
+def is_local_request(request: Request) -> bool:
+    return _hostname(request.headers.get("host", "")) in _LOCAL_HOSTS and not any(h in request.headers for h in _FORWARDED)
+
+
+@app.middleware("http")
+async def access_guard(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin is not None:
+        o = origin.split("://", 1)[-1]
+        if origin == "null" or _hostname(o) not in _LOCAL_HOSTS:
+            return JSONResponse({"detail": "Requests from other websites aren't accepted."}, status_code=403)
+    if not is_local_request(request) and (request.method, request.url.path) not in _REMOTE_OK:
+        return JSONResponse({"detail": "Not available remotely."}, status_code=403)
+    return await call_next(request)
 
 
 def changed(con, fill: bool = False) -> None:
@@ -69,8 +103,12 @@ def require_task(con, task_id: int) -> dict:
 
 
 def push_if_planner(background: BackgroundTasks, task: dict) -> None:
-    if task.get("source") == "planner":
+    # Tasks pushed by Power Automate are one-way (Planner → Memory): nothing is written back to Planner for them.
+    if task.get("source") == "planner" and task.get("sync_via") != planner_push.VIA:
         background.add_task(planner_sync.push_task, task["id"])
+
+
+PLANNER_MANAGED = {"title", "due_at", "priority"}  # owned by Planner for Power Automate-synced tasks
 
 
 # ---------- state ----------
@@ -135,6 +173,8 @@ def update_task(task_id: int, body: TaskUpdate, background: BackgroundTasks):
     with db.connect() as con:
         t = require_task(con, task_id)
         fields = body.model_dump(exclude_unset=True)
+        if t.get("sync_via") == planner_push.VIA and PLANNER_MANAGED & fields.keys():
+            raise HTTPException(409, "That's managed in Microsoft Planner: change it there and it updates here on the next sync.")
         status = fields.pop("status", None)
         if "creative_score" in fields and "creative_locked" not in fields:
             fields["creative_locked"] = True
@@ -813,10 +853,55 @@ def planner_logout():
 
 
 @app.post("/api/planner/sync")
-def planner_sync_now():
-    result = planner_sync.sync()
+async def planner_sync_endpoint(request: Request, allow_empty: bool = False):
+    """Two ways in. With a {"tasks": [...]} body (Power Automate): a one-way snapshot sync that needs the bearer
+    token. With no body (the Planner button in Memory): pull from Microsoft Graph, which only works locally."""
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > planner_push.MAX_BODY_BYTES:
+        return JSONResponse({"success": False, "error": "Request too large."}, status_code=413)
+    raw = await request.body()
+    if raw.strip() or request.headers.get("authorization"):
+        return await _planner_push(request, raw, allow_empty)
+    if not is_local_request(request):
+        return JSONResponse({"success": False, "error": "Unauthorized."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+    result = await asyncio.to_thread(planner_sync.sync)
     bus.publish("state")
     return result
+
+
+async def _planner_push(request: Request, raw: bytes, allow_empty: bool):
+    client = request.client.host if request.client else "unknown"
+    if planner_push.throttled(client):
+        return JSONResponse({"success": False, "error": "Too many failed attempts. Try again in a minute."}, status_code=429)
+    if not planner_push.configured():
+        return JSONResponse({"success": False, "error": "Planner sync isn't configured on this server."}, status_code=503)
+    if not planner_push.authorize(request.headers.get("authorization"), client):
+        return JSONResponse({"success": False, "error": "Unauthorized."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+    if len(raw) > planner_push.MAX_BODY_BYTES:
+        return JSONResponse({"success": False, "error": "Request too large."}, status_code=413)
+    if "json" not in request.headers.get("content-type", "").lower():
+        return JSONResponse({"success": False, "error": "Send the body as JSON (Content-Type: application/json)."}, status_code=415)
+    try:
+        body = PlannerPushBody.model_validate_json(raw)
+    except ValidationError as e:
+        problems = [f"{'.'.join(str(p) for p in err['loc']) or 'body'}: {err['msg']}" for err in e.errors()[:20]]
+        return JSONResponse({"success": False, "error": "Invalid request.", "details": problems}, status_code=400)
+    try:
+        result = await asyncio.to_thread(planner_push.apply, body.tasks, allow_empty)
+    except Exception:
+        log.exception("Planner sync failed")
+        return JSONResponse({"success": False, "error": "Internal error."}, status_code=500)
+    bus.publish("state")
+    return result
+
+
+@app.get("/api/planner/push-status")
+def planner_push_status():
+    """For Settings: whether the Power Automate token is configured (never the token itself), and the last sync."""
+    with db.connect() as con:
+        last = db.get_sync(con, "planner_last_result")
+        return {"configured": planner_push.configured(), "token_variable": planner_push.TOKEN_ENV,
+                "last_sync": db.get_sync(con, "planner_last_sync"), "last_result": last if (last or {}).get("via") == planner_push.VIA else None}
 
 
 # ---------- events ----------

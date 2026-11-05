@@ -259,7 +259,7 @@ def _pull(token: str) -> dict:
     with db.connect() as con:
         for pt in tasks:
             ext = pt["id"]
-            row = con.execute("SELECT * FROM tasks WHERE external_id = ?", (ext,)).fetchone()
+            row = con.execute("SELECT * FROM tasks WHERE source = 'planner' AND external_id = ?", (ext,)).fetchone()
             done = pt.get("percentComplete") == 100
             if row is None and done:
                 continue

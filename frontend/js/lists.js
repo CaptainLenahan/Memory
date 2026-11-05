@@ -93,7 +93,8 @@ export function taskRow(t) {
   if (t.checklist_total) meta.push(`<span>${t.checklist_done}/${t.checklist_total}</span>`);
   if (t.attachment_count) meta.push(`<span>${iconHtml('clip')}${t.attachment_count}</span>`);
   if (t.status !== 'done' && t.assigned_week) meta.push(`<span class="${t.at_risk ? 'soon' : ''}" title="Estimated completion week">${iconHtml('week')}${esc(fmtWeek(t.assigned_week, store.state.weeks).replace('Week of ', 'wk '))}</span>`);
-  if (t.plan_name) meta.push(`<span>${iconHtml('planner')}${esc(t.plan_name)}</span>`);
+  if (t.plan_name) meta.push(`<span title="From Microsoft Planner">${iconHtml('planner')}${esc(t.plan_name)}</span>`);
+  if (t.percent_complete > 0 && t.percent_complete < 100) meta.push(`<span title="Progress in Microsoft Planner">${t.percent_complete}%</span>`);
 
   const row = h('div', {
     class: `task-row ${t.status === 'done' ? 'done' : ''} ${store.selectedId === t.id ? 'selected' : ''}`,

@@ -160,9 +160,17 @@ function themePicker() {
 }
 
 async function renderPlanner(box, save) {
-  let st;
+  let st, push;
   try { st = await api('/api/planner/status'); } catch { return; }
+  try { push = await api('/api/planner/push-status'); } catch { push = null; }
   box.replaceChildren();
+  if (push) {
+    const r = push.last_result;
+    box.append(h('div', { class: `status-line ${push.configured ? 'ok' : ''}` },
+      push.configured
+        ? `Power Automate sync: ready${r ? ` · last received ${fmtDateTime(r.synced_at)}: ${r.received} tasks (${r.created} new, ${r.updated} updated, ${r.archived} archived)` : ' · nothing received yet'}`
+        : `Power Automate sync: off. Set ${push.token_variable} to turn it on (see README).`));
+  }
   const line = st.signed_in
     ? h('div', { class: 'status-line ok' }, `Signed in as ${st.account}${st.last_sync ? ` · last sync ${fmtDateTime(st.last_sync)}` : ''}`)
     : h('div', { class: 'status-line' }, st.configured ? 'Not signed in.' : 'Enter a client ID and save to connect.');

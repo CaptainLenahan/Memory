@@ -103,6 +103,59 @@ Once you're signed in:
 - **Push.** Completing a Planner task, ticking its checklist, or changing its title, priority or due date writes the change back to Planner.
 - **Schedule.** Sync runs every 15 minutes, or on demand with the **Planner** button.
 
+### Sync Planner with Power Automate (one-way, no Azure app needed)
+
+If your organisation won't allow an app registration, a Power Automate cloud flow can push your active Planner tasks to Memory instead: **Recurrence → List my tasks → Filter array (`percentComplete` < 100) → Select → HTTP**.
+
+**What a sync does**
+
+- **New tasks:** the flow sends a full snapshot of your active Planner tasks. Each one that's new to Memory is created in the **Basket**, with `source = "planner"` and `external_id` set to the Planner ID. Memory's own task IDs stay separate, and `(source, external_id)` is unique, so running the flow again never makes duplicates.
+- **Known tasks:** their Planner fields are updated: title, percent complete, priority, due date, start date, plan ID and bucket ID. Notes, steps, files, links, tags and synapse placement are yours and are never touched, and unchanged tasks are skipped. Each task records `last_synced_at` in UTC.
+- **Removals:** Planner tasks that Memory still shows as open but that are missing from the snapshot were completed or removed in Planner. They're **archived**, meaning marked done and flagged, never deleted. If one becomes active in Planner again, it's restored.
+- **Your decisions win:** tasks you completed yourself in Memory stay completed, and tasks you created in Memory are never affected.
+- **Empty snapshots:** a snapshot with no tasks archives nothing, in case the flow misfired. Add `?allow_empty=true` to the URL if you really want that.
+- **One-way only:** nothing is ever written back to Planner. In Memory, these tasks show a small Planner note, and their title, due date and priority are read-only.
+
+**Set up the token**
+
+Run this once. It saves a random token as `MEMORY_PLANNER_SYNC_TOKEN` in `%LOCALAPPDATA%\Memory\.env`, copies it to your clipboard without showing it, and restarts Memory. Run it again to replace the token.
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\new-sync-token.ps1
+```
+
+The token is only ever read from the environment or that `.env` file. It isn't stored in the database, shown in the app or written to the log. Settings → *Microsoft Planner & Outlook* only shows whether it's set, along with the last sync.
+
+**The flow's HTTP action**
+
+| Field | Value |
+|---|---|
+| Method | `POST` |
+| URI | `https://<your-tunnel-host>/api/planner/sync` |
+| Headers | `Content-Type: application/json` and `Authorization: Bearer <token>` |
+| Body | `{"tasks": @{body('Select')}}` |
+
+Responses:
+
+- **200** with `{"success": true, "received", "created", "updated", "unchanged", "archived", "restored", "kept_done", "warnings", "synced_at"}`.
+- **400** for malformed data, with details.
+- **401** for a missing or wrong token, and **429** after repeated wrong tokens.
+- **413** if the request is over 2 MB.
+- **415** if it isn't JSON.
+- **503** if no token is configured.
+
+**Reaching your PC from the cloud**
+
+Memory only listens on `127.0.0.1`, so a cloud flow can't reach it directly. You need an HTTPS tunnel to `http://localhost:8765`, for example [Microsoft Dev Tunnels](https://learn.microsoft.com/azure/developer/dev-tunnels/), Cloudflare Tunnel or ngrok. Requests that arrive through a tunnel, or from any other website, can only reach `POST /api/planner/sync`, and only with the token; the rest of Memory stays local. Check with IT before exposing a work PC to the internet.
+
+**Test it locally**
+
+Once the token is set, this posts a sample Planner task using the token from your `.env`. Every request is a full snapshot, so this archives any other Planner tasks Memory has from earlier syncs; the next real sync restores them.
+
+```bash
+powershell -Command "$t = (Get-Content $env:LOCALAPPDATA\Memory\.env | Select-String '^MEMORY_PLANNER_SYNC_TOKEN=').Line.Split('=',2)[1]; Invoke-RestMethod -Method Post http://localhost:8765/api/planner/sync -Headers @{Authorization = \"Bearer $t\"} -ContentType 'application/json' -Body '{\"tasks\":[{\"id\":\"KGEFAhIzkUu2r_CGbNO6VmUADrzz\",\"title\":\"Microsoft Update Catalog Ingestion\",\"percentComplete\":0,\"priority\":5,\"dueDate\":\"2026-10-15T10:00:00Z\",\"startDate\":null,\"planId\":\"oM7TZEj9TUivltGR1o1682UAH2h9\",\"bucketId\":\"nRXbhxBR-EiMvRhRXledDGUACBIX\"}]}'"
+```
+
 ## Using it
 
 | Action | How |

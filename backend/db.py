@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     activated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_tasks_status ON tasks(status);
-CREATE UNIQUE INDEX IF NOT EXISTS ix_tasks_external ON tasks(external_id) WHERE external_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ix_tasks_source_external ON tasks(source, external_id) WHERE external_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS checklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,6 +192,15 @@ def _migrate(con) -> None:
     cols = {r["name"] for r in con.execute("PRAGMA table_info(tasks)")}
     if "notify" not in cols:
         con.execute("ALTER TABLE tasks ADD COLUMN notify TEXT NOT NULL DEFAULT 'desktop'")
+    for name, ddl in (("percent_complete", "INTEGER"), ("start_at", "TEXT"), ("plan_id", "TEXT"), ("bucket_id", "TEXT"),
+                      ("last_synced_at", "TEXT"),                          # UTC ISO-8601, set by every Planner sync
+                      ("sync_via", "TEXT"),                                # 'power-automate' for pushed Planner tasks
+                      ("sync_archived", "INTEGER NOT NULL DEFAULT 0")):    # archived because it left Planner's active list
+        if name not in cols:
+            con.execute(f"ALTER TABLE tasks ADD COLUMN {name} {ddl}")
+    # external ids are unique per source (source, external_id), not across all sources
+    con.execute("DROP INDEX IF EXISTS ix_tasks_external")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_tasks_source_external ON tasks(source, external_id) WHERE external_id IS NOT NULL")
     if not get_sync(con, "manual_links_to_dependencies"):
         # linking two tasks now means "this one, then that one": convert hand-made links, older task first
         for r in con.execute("SELECT a_id, b_id FROM links WHERE kind = 'manual'").fetchall():
@@ -211,6 +220,8 @@ TASK_FIELDS = {
     "priority", "important", "my_day", "effort", "due_at", "reminder_at", "reminded", "due_notified",
     "repeat", "assigned_week", "week_locked", "at_risk", "pinned", "growth", "score", "tags", "source",
     "external_id", "etag", "details_etag", "plan_name", "bucket_name", "completed_at", "activated_at", "notify",
+    # Planner metadata (Power Automate sync): Planner owns these; see planner_push.py
+    "percent_complete", "start_at", "plan_id", "bucket_id", "last_synced_at", "sync_via", "sync_archived",
 }
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 Priority = Literal["low", "medium", "high", "urgent"]
 Effort = Literal["S", "M", "L", "XL"]
@@ -162,6 +162,44 @@ class TemplateUse(BaseModel):
 
 class DependencyBody(BaseModel):
     depends_on_id: int
+
+
+PLANNER_ID = r"^[A-Za-z0-9_\-]{1,128}$"  # Planner ids are base64url-like
+
+
+class PlannerPushTask(BaseModel):
+    """One active Planner task, as produced by the flow's Select action. Strict: no type coercion, unknown fields ignored."""
+    model_config = ConfigDict(strict=True, extra="ignore")
+
+    id: str = Field(pattern=PLANNER_ID)
+    title: str = Field(min_length=1, max_length=500)
+    percentComplete: int = Field(default=0, ge=0, le=100)
+    priority: Optional[int] = Field(default=None, ge=0, le=10)
+    dueDate: Optional[AwareDatetime] = None
+    startDate: Optional[AwareDatetime] = None
+    planId: Optional[str] = Field(default=None, pattern=PLANNER_ID)
+    bucketId: Optional[str] = Field(default=None, pattern=PLANNER_ID)
+
+    @field_validator("title")
+    @classmethod
+    def _clean_title(cls, v: str) -> str:
+        v = "".join(ch for ch in v if ch >= " " or ch == "\t").strip()
+        if not v:
+            raise ValueError("title must not be blank")
+        return v
+
+    @field_validator("dueDate", "startDate")
+    @classmethod
+    def _utc(cls, v):
+        if v is not None and v.utcoffset().total_seconds() != 0:
+            raise ValueError("must be a UTC time (ending in Z or +00:00)")
+        return v
+
+
+class PlannerPushBody(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore")
+
+    tasks: list[PlannerPushTask] = Field(max_length=5000)
 
 
 class LoginBody(BaseModel):

@@ -118,8 +118,12 @@ function render() {
   if (focusKey) panel().querySelector(`[data-key="${focusKey}"]`)?.focus();
 }
 
+// Power Automate-synced Planner tasks are one-way: Planner owns these fields, so they're read-only here.
+const plannerManaged = t => t.sync_via === 'power-automate';
+
 function header(t) {
-  const title = h('textarea', { rows: 1, 'aria-label': 'Title', maxlength: 500, dataset: { key: 'title' } });
+  const title = h('textarea', { rows: 1, 'aria-label': 'Title', maxlength: 500, dataset: { key: 'title' }, readonly: plannerManaged(t) || null,
+    title: plannerManaged(t) ? 'Managed in Microsoft Planner' : null });
   title.value = t.title;
   const fit = () => { title.style.height = 'auto'; title.style.height = `${title.scrollHeight}px`; };
   requestAnimationFrame(fit);
@@ -154,7 +158,10 @@ function header(t) {
       h('span', { class: 'loc' }, icon(t.status === 'active' ? 'brain' : t.status === 'backlog' ? 'queue' : t.status === 'basket' ? 'basket' : 'done'), loc.text),
       h('span', {}, '·'), h('span', {}, regionName),
       t.at_risk ? h('span', { class: 'warn-text' }, '· at risk for due date') : null),
-    h('div', { class: 'tp-status' }, actions));
+    h('div', { class: 'tp-status' }, actions),
+    plannerManaged(t) ? h('div', { class: 'planner-note' }, icon('planner'),
+      h('span', {}, `From Microsoft Planner${t.percent_complete ? ` · ${t.percent_complete}% complete` : ''}${t.start_at ? ` · starts ${fmtDate(t.start_at)}` : ''}. `,
+        'Title, due date and priority are managed in Planner and refresh on each sync; notes, steps and files stay in Memory.')) : null);
 }
 
 async function placeOnBrain() {
@@ -245,7 +252,8 @@ function stepsCard(t) {
 function scheduleCard(t) {
   const today = todayISO();
   const inMyDay = t.my_day === today;
-  const due = h('input', { type: 'date', class: 'input', value: t.due_at?.slice(0, 10) || '', 'aria-label': 'Due date' });
+  const due = h('input', { type: 'date', class: 'input', value: t.due_at?.slice(0, 10) || '', 'aria-label': 'Due date', disabled: plannerManaged(t) || null,
+    title: plannerManaged(t) ? 'Managed in Microsoft Planner' : null });
   due.addEventListener('change', () => update({ due_at: due.value || null }));
   const remind = h('input', { type: 'datetime-local', class: 'input', value: t.reminder_at || '', 'aria-label': 'Reminder' });
   remind.addEventListener('change', () => update({ reminder_at: remind.value || null }));
@@ -260,8 +268,8 @@ function scheduleCard(t) {
     h('div', { class: 'row' }, icon('bell'), h('label', {}, 'Remind me'), h('div', { class: 'ctl' }, remind,
       t.reminder_at ? h('button', { class: 'clear', title: 'Clear', onclick: () => update({ reminder_at: null }) }, icon('x')) : null)),
     h('div', { class: 'row' }, icon('calendar'), h('label', {}, 'Due'), h('div', { class: 'ctl' }, due,
-      t.due_at ? h('button', { class: 'clear', title: 'Clear', onclick: () => update({ due_at: null }) }, icon('x')) : null)),
-    t.due_at ? null : h('div', { class: 'row' }, h('span', { style: { width: '18px' } }), h('div', { class: 'ctl' }, quick('Today', 0), quick('Tomorrow', 1), quick('Next week', 7))),
+      t.due_at && !plannerManaged(t) ? h('button', { class: 'clear', title: 'Clear', onclick: () => update({ due_at: null }) }, icon('x')) : null)),
+    t.due_at || plannerManaged(t) ? null : h('div', { class: 'row' }, h('span', { style: { width: '18px' } }), h('div', { class: 'ctl' }, quick('Today', 0), quick('Tomorrow', 1), quick('Next week', 7))),
     h('div', { class: 'row' }, icon('repeat'), h('label', {}, 'Repeat'), h('div', { class: 'ctl' }, repeat)),
     h('div', { class: 'row', title: 'How reminders and due dates reach you for this task' }, icon('send'), h('label', {}, 'Notify'), h('div', { class: 'ctl' },
       seg([['desktop', 'Desktop'], ['email', 'Email'], ['both', 'Both'], ['off', 'Off']], t.notify || 'desktop', v => update({ notify: v })))));
@@ -313,7 +321,8 @@ function planningCard(t) {
 
   return h('div', { class: 'card' },
     h('div', { class: 'row' }, icon('flag'), h('label', {}, 'Priority'), h('div', { class: 'ctl' },
-      seg([['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['urgent', 'Urgent']], t.priority, v => update({ priority: v })))),
+      plannerManaged(t) ? h('span', { class: 'status-line', title: 'Managed in Microsoft Planner' }, `${t.priority[0].toUpperCase()}${t.priority.slice(1)} (from Planner)`)
+        : seg([['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['urgent', 'Urgent']], t.priority, v => update({ priority: v })))),
     h('div', { class: 'row' }, icon('clock'), h('label', {}, 'Effort'), h('div', { class: 'ctl' },
       seg([['S', 'S · 2h'], ['M', 'M · 6h'], ['L', 'L · 12h'], ['XL', 'XL · 24h']], t.effort, v => update({ effort: v })))),
     h('div', { class: 'row' }, icon('week'), h('label', {}, 'Finish by'), h('div', { class: 'ctl' }, weekSel)),
