@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse  # n
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
-from . import claude_service, db, desktop, engine, mail, notify, paths, planner_push, planner_sync, sysinfo, wallpaper, windows  # noqa: E402
+from . import claude_service, db, desktop, engine, mail, notify, paths, planner_push, planner_sync, sysinfo, tunnel, wallpaper, windows  # noqa: E402
 from .classifier import creative_score, region_for  # noqa: E402
 from .models import (  # noqa: E402
     ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, LoginBody, OpenBody, PlaceBody,
@@ -48,9 +48,12 @@ async def lifespan(app: FastAPI):
         s = db.get_settings(con)
     if s.get("desktop_wallpaper"):  # give the server a moment to start listening before Edge asks for the page
         threading.Timer(2, wallpaper.start, args=(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))).start()
+    if s.get("dev_tunnel_id"):
+        tunnel.start(s["dev_tunnel_id"])
     yield
     task.cancel()
     wallpaper.stop()
+    tunnel.stop()
 
 
 log = logging.getLogger("memory.app")
@@ -650,6 +653,8 @@ def put_settings(body: SettingsUpdate):
         db.set_settings(con, values)
         changed(con, fill=True)
         s = db.get_settings(con)
+    if "dev_tunnel_id" in values:
+        tunnel.start(s.get("dev_tunnel_id") or "")
     if "desktop_wallpaper" in values or ("wallpaper_screens" in values and s.get("desktop_wallpaper")):
         if s.get("desktop_wallpaper"):
             wallpaper.start(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))
@@ -895,12 +900,17 @@ async def _planner_push(request: Request, raw: bytes, allow_empty: bool):
     return result
 
 
+@app.get("/api/tunnel")
+def tunnel_status():
+    return tunnel.status()
+
+
 @app.get("/api/planner/push-status")
 def planner_push_status():
     """For Settings: whether the Power Automate token is configured (never the token itself), and the last sync."""
     with db.connect() as con:
         last = db.get_sync(con, "planner_last_result")
-        return {"configured": planner_push.configured(), "token_variable": planner_push.TOKEN_ENV,
+        return {"configured": planner_push.configured(), "token_variable": planner_push.TOKEN_ENV, "tunnel": tunnel.status(),
                 "last_sync": db.get_sync(con, "planner_last_sync"), "last_result": last if (last or {}).get("via") == planner_push.VIA else None}
 
 

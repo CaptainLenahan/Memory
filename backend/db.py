@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "welcomed": False,  # first-run welcome shown
     "desktop_wallpaper": False,  # built-in desktop wallpaper (the brain behind your icons)
     "wallpaper_screens": "all",  # "all" screens or just the "primary" one
+    "dev_tunnel_id": "",  # Microsoft Dev Tunnel Memory keeps open for the Power Automate sync ("" = none)
     "slot_positions": {},  # synapse index -> [x, y, z, nx, ny, nz] where the user dragged it (Arrange mode)  # where email notifications go; blank = the signed-in Microsoft account
     # quick links on the desktop wallpaper / left rail: web addresses, app links (ms-teams:) or file/folder paths
     "quick_links": [

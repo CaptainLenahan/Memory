@@ -166,10 +166,23 @@ async function renderPlanner(box, save) {
   box.replaceChildren();
   if (push) {
     const r = push.last_result;
-    box.append(h('div', { class: `status-line ${push.configured ? 'ok' : ''}` },
-      push.configured
-        ? `Power Automate sync: ready${r ? ` · last received ${fmtDateTime(r.synced_at)}: ${r.received} tasks (${r.created} new, ${r.updated} updated, ${r.archived} archived)` : ' · nothing received yet'}`
-        : `Power Automate sync: off. Set ${push.token_variable} to turn it on (see README).`));
+    const tn = push.tunnel || {};
+    const tunnelInput = h('input', { class: 'input', value: tn.tunnel_id || '', placeholder: 'e.g. memory-sync', style: { maxWidth: '220px' } });
+    const saveTunnel = h('button', { class: 'btn small', onclick: async () => {
+      try { await api('/api/settings', { method: 'PUT', body: { dev_tunnel_id: tunnelInput.value.trim() } }); setTimeout(() => renderPlanner(box, save), 4000); toast('Tunnel setting saved'); }
+      catch (e) { toastError(e); }
+    } }, 'Save');
+    const flowUrl = tn.url ? `${tn.url}/api/planner/sync` : null;
+    box.append(
+      h('div', { class: `status-line ${push.configured ? 'ok' : ''}` },
+        push.configured
+          ? `Power Automate sync: ready${r ? ` · last received ${fmtDateTime(r.synced_at)}: ${r.received} tasks (${r.created} new, ${r.updated} updated, ${r.archived} archived)` : ' · nothing received yet'}`
+          : `Power Automate sync: off. Set ${push.token_variable} to turn it on (see README).`),
+      h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', margin: '6px 0' } },
+        h('span', { class: 'status-line' }, 'Dev tunnel:'), tunnelInput, saveTunnel,
+        h('span', { class: `status-line ${tn.running ? 'ok' : ''}` }, tn.tunnel_id ? (tn.running ? 'running' : tn.reason) : 'none')),
+      flowUrl ? h('div', { class: 'status-line' }, 'Flow URL: ', h('code', {}, flowUrl), ' ',
+        h('button', { class: 'btn small ghost', onclick: () => navigator.clipboard.writeText(flowUrl).then(() => toast('Flow URL copied')) }, 'Copy')) : null);
   }
   const line = st.signed_in
     ? h('div', { class: 'status-line ok' }, `Signed in as ${st.account}${st.last_sync ? ` · last sync ${fmtDateTime(st.last_sync)}` : ''}`)

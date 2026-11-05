@@ -364,3 +364,17 @@ def test_open_new_task_popup_for_a_synapse(monkeypatch):
         assert url.endswith(f"#new&after={t['id']}")
         assert client.post("/api/open", json={"new": True, "window": "popup", "new_slot": 99}).status_code == 422
         client.delete(f"/api/tasks/{t['id']}")
+
+
+def test_dev_tunnel_setting_starts_and_stops_hosting(monkeypatch):
+    from backend import tunnel
+    calls = []
+    monkeypatch.setattr(tunnel, "start", lambda tid: calls.append(tid))
+    with TestClient(app) as client:
+        assert client.put("/api/settings", json={"dev_tunnel_id": "memory-sync"}).status_code == 200
+        assert client.put("/api/settings", json={"dev_tunnel_id": "bad id; rm -rf"}).status_code == 422
+        client.put("/api/settings", json={"dev_tunnel_id": ""})
+        client.put("/api/settings", json={"ram_slots": 7})
+        status = client.get("/api/tunnel").json()
+        assert "running" in status and "url" in status
+    assert calls == ["memory-sync", ""]

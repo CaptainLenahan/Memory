@@ -131,8 +131,8 @@ The token is only ever read from the environment or that `.env` file. It isn't s
 | Field | Value |
 |---|---|
 | Method | `POST` |
-| URI | `https://<your-tunnel-host>/api/planner/sync` |
-| Headers | `Content-Type: application/json` and `Authorization: Bearer <token>` |
+| URI | the **Flow URL** from Settings, e.g. `https://<id>-8765.<region>.devtunnels.ms/api/planner/sync` |
+| Headers | `Content-Type: application/json`, `Authorization: Bearer <token>` and `X-Tunnel-Skip-AntiPhishing-Page: true` |
 | Body | `{"tasks": @{body('Select')}}` |
 
 Responses:
@@ -144,9 +144,32 @@ Responses:
 - **415** if it isn't JSON.
 - **503** if no token is configured.
 
-**Reaching your PC from the cloud**
+**Reaching your PC from the cloud (Dev Tunnels)**
 
-Memory only listens on `127.0.0.1`, so a cloud flow can't reach it directly. You need an HTTPS tunnel to `http://localhost:8765`, for example [Microsoft Dev Tunnels](https://learn.microsoft.com/azure/developer/dev-tunnels/), Cloudflare Tunnel or ngrok. Requests that arrive through a tunnel, or from any other website, can only reach `POST /api/planner/sync`, and only with the token; the rest of Memory stays local. Check with IT before exposing a work PC to the internet.
+Memory only listens on `127.0.0.1`, so a cloud flow needs an HTTPS tunnel. Memory can keep a [Microsoft Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) open for you. Set it up once:
+
+```bash
+winget install Microsoft.devtunnel
+```
+
+```bash
+devtunnel user login
+```
+
+```bash
+devtunnel create memory-sync --allow-anonymous
+```
+
+```bash
+devtunnel port create memory-sync -p 8765 --protocol http
+```
+
+Then put `memory-sync` in **Settings → Microsoft Planner & Outlook → Dev tunnel** and save. Memory hosts the tunnel silently whenever it's running and restarts it if it drops. Settings shows the public **Flow URL**, which stays the same from run to run.
+
+- **Anonymous access:** the tunnel allows anonymous connections because a flow can't sign in to Dev Tunnels. Memory protects itself instead: through the tunnel, every route returns 403 except `POST /api/planner/sync`, which needs the sync token.
+- **Keeping it alive:** a tunnel that isn't hosted for 30 days expires; Memory hosting it keeps it alive.
+- **Re-signing in:** if Settings says to sign in again, run `devtunnel user login`.
+- **IT approval:** check with IT before exposing a work PC through a tunnel.
 
 **Test it locally**
 
