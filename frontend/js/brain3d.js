@@ -478,7 +478,7 @@ export class Brain {
       if (t?.at_risk && !syn.urgentColor) syn.urgentColor = SOON;
       if (syn.urgentColor) syn.urgency.material.color.copy(syn.urgentColor);
       const g = t ? t.growth : -1;
-      const growKey = t ? `${t.id}|${g}|${t.checklist_total}|${t.checklist_done}|${color.getHexString()}` : '';
+      const growKey = t ? `${t.id}|${g}|${t.checklist_total}|${t.checklist_done}|${color.getHexString()}|${this.uniforms.uGlow.value.getHexString()}` : '';
       if (growKey !== syn.growKey) { syn.growth = g; syn.growKey = growKey; this.grow(syn); }
       syn.label.classList.toggle('empty', !t);
       syn.label.classList.toggle('urgent', syn.urgentColor === URGENT);
@@ -492,11 +492,12 @@ export class Brain {
     this.setLinks(links, deps);
   }
 
-  // Dendrites, drawn like a neuron's: every step on the task grows its own main dendrite (finished steps light theirs
-  // up), on top of two base ones. Each branches one to three levels deep, deeper and longer as notes, files, links
-  // and time add growth, tapering as it splits, with a glowing knob (bouton) at every tip. Branches are seeded per
-  // task and per index, so a new step adds a branch without reshaping the others. One merged mesh per brightness
-  // plus one point cloud per synapse keep it cheap to draw.
+  // Dendrites, drawn like a neuron embedded in tissue: they grow from the synapse INTO the brain, fanning out in a cone
+  // and branching as they go, and never leave the brain's volume. Every step on the task grows its own main dendrite
+  // (on top of two base ones); notes, files, links and time add length and up to three levels of tapering branches,
+  // each ending in a glowing bouton. Colour runs from the synapse's own colour at the root into the brain's theme glow
+  // at the tips, fading with depth, so the tree blends into the brain; finished steps glow brighter. Shapes are seeded
+  // per task and branch, so a new step adds a branch without reshaping the rest. One mesh + one point cloud each.
   grow(syn) {
     this.clearDendrites(syn);
     const task = syn.task;
@@ -506,72 +507,86 @@ export class Brain {
     const done = Math.min(task.checklist_done || 0, steps);
     const primaries = 2 + steps;
     const depth = 1 + (g > 0.2 || steps >= 3 ? 1 : 0) + (g > 0.55 || steps >= 8 ? 1 : 0);
-    const reach = Math.min(0.28, 0.08 + 0.15 * g + 0.006 * steps);
+    const reach = Math.min(0.26, 0.08 + 0.13 * g + 0.006 * steps);
+    const maxDist = reach * 2.1;
     const n = syn.normal;
+    const inward = n.clone().negate();
     const t1 = new THREE.Vector3().crossVectors(n, Math.abs(n.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
     const t2 = new THREE.Vector3().crossVectors(n, t1).normalize();
-    const lit = [], dim = [], tips = [], tipColors = [];
-    const color = syn.core.material.color;
-    // Keep every branch on the brain: project each point back onto the surface (just above it), so dendrites wrap
-    // around the brain's curve instead of running off along a flat plane at the edge.
+    const synColor = syn.core.material.color.clone();
+    const glow = this.uniforms.uGlow.value.clone();                 // the brain's theme colour
     const origin = syn.group.position;
-    const toSurface = local => {
+
+    // keep a point inside its hemisphere (a little under the surface)
+    const inside = local => {
       const q = local.clone().add(origin);
       const side = syn.slot.side || (q.x < 0 ? -1 : 1);
-      const dir = new THREE.Vector3((q.x - side * HEMI_CENTER_X) / 0.6, (q.y - 0.08) / 0.72, q.z / 1.1).normalize();
-      const surface = hemisphereSurface(dir, side).p;
-      const out = surface.clone().sub(new THREE.Vector3(side * HEMI_CENTER_X, 0.08, 0)).normalize();
-      return surface.addScaledVector(out, 0.008).sub(origin);
+      const c = new THREE.Vector3(side * HEMI_CENTER_X, 0.08, 0);
+      const dir = new THREE.Vector3((q.x - c.x) / 0.6, (q.y - c.y) / 0.72, q.z / 1.1).normalize();
+      const limit = hemisphereSurface(dir, side, false).p.distanceTo(c) * 0.9;
+      const r = q.distanceTo(c);
+      if (r > limit) q.sub(c).multiplyScalar(limit / r).add(c);
+      return q.sub(origin);
     };
-    const bright = color.clone().lerp(new THREE.Color(1, 1, 1), 0.45);
+    // colour at a point: synapse colour near the root, theme glow and dimmer deeper in
+    const shade = (local, on) => {
+      const t = Math.min(1, local.length() / maxDist);
+      return synColor.clone().lerp(glow, 0.3 + 0.6 * t).multiplyScalar((on ? 0.75 : 0.42) * (1 - 0.55 * t));
+    };
 
+    const tubes = [], tips = [], tipColors = [];
     const branch = (start, dir, len, radius, level, rnd, on) => {
       const pts = [start.clone()];
       const d = dir.clone();
-      const segs = 6;
+      const segs = 5;
       for (let s = 1; s <= segs; s++) {
-        d.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.35)).normalize();
-        const next = toSurface(pts[s - 1].clone().addScaledVector(d, len / segs));
-        d.copy(next).sub(pts[s - 1]).normalize();                              // carry on along the surface
+        d.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.3)).normalize();
+        const next = inside(pts[s - 1].clone().addScaledVector(d, len / segs));
+        d.copy(next).sub(pts[s - 1]).normalize();
         pts.push(next);
       }
       const curve = new THREE.CatmullRomCurve3(pts);
-      (on ? lit : dim).push(new THREE.TubeGeometry(curve, 12, radius, 4, false));
+      const tube = new THREE.TubeGeometry(curve, 10, radius, 4, false);
+      const pos = tube.attributes.position, v = new THREE.Vector3(), colors = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const c = shade(v.fromBufferAttribute(pos, i), on);
+        colors.set([c.r, c.g, c.b], i * 3);
+      }
+      tube.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      tubes.push(tube);
       if (level >= depth) {
-        tips.push(pts[segs]);
-        tipColors.push(on ? bright : color.clone().multiplyScalar(0.8));
+        const tip = pts[segs];
+        tips.push(tip);
+        tipColors.push(shade(tip, on).multiplyScalar(on ? 1.9 : 1.4));
         return;
       }
       const kids = level === 1 && rnd() > 0.55 ? 3 : 2;
+      const axis = new THREE.Vector3().crossVectors(d, Math.abs(d.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
       for (let k = 0; k < kids; k++) {
-        const spread = (k - (kids - 1) / 2) * (0.55 + rnd() * 0.45);
-        const from = curve.getPoint(0.7 + rnd() * 0.3);
-        branch(from, d.clone().applyAxisAngle(n, spread), len * (0.55 + rnd() * 0.15), radius * 0.62, level + 1, rnd, on);
+        const turn = (k - (kids - 1) / 2) * (0.45 + rnd() * 0.35);
+        const childDir = d.clone().applyAxisAngle(axis.clone().applyAxisAngle(d, rnd() * Math.PI * 2), turn);
+        branch(curve.getPoint(0.65 + rnd() * 0.3), childDir, len * (0.55 + rnd() * 0.15), radius * 0.62, level + 1, rnd, on);
       }
     };
 
     for (let i = 0; i < primaries; i++) {
       let seed = (task.id * 7919 + i * 104729) % 233280;
       const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
-      const ang = i * 2.39996 + rnd() * 0.35;                                      // golden angle: evenly spread
-      const dir = t1.clone().multiplyScalar(Math.cos(ang)).addScaledVector(t2, Math.sin(ang));
-      const on = i < done;                                                         // first branches = finished steps
-      branch(new THREE.Vector3(), dir, reach * (0.75 + rnd() * 0.5), 0.0048 * (0.85 + rnd() * 0.3), 1, rnd, on);
+      const around = i * 2.39996 + rnd() * 0.35;                                 // golden angle: evenly spread
+      const tilt = 0.45 + rnd() * 0.6;                                            // 25-60° off straight in
+      const sideways = t1.clone().multiplyScalar(Math.cos(around)).addScaledVector(t2, Math.sin(around));
+      const dir = inward.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(sideways, Math.sin(tilt)).normalize();
+      branch(new THREE.Vector3(), dir, reach * (0.75 + rnd() * 0.5), 0.0046 * (0.85 + rnd() * 0.3), 1, rnd, i < done);
     }
 
-    const add = (geos, opacity) => {
-      if (!geos.length) return;
-      const mesh = new THREE.Mesh(mergeIndexed(geos), new THREE.MeshBasicMaterial({
-        color: geos === lit ? bright : color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false }));
-      geos.forEach(geo => geo.dispose());
-      syn.dendrites.add(mesh);
-    };
-    add(dim, 0.5 + g * 0.3);
-    add(lit, 0.85);
+    const mesh = new THREE.Mesh(mergeIndexed(tubes), new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+    tubes.forEach(geo => geo.dispose());
+    syn.dendrites.add(mesh);
     if (tips.length) {
       const tg = new THREE.BufferGeometry().setFromPoints(tips);
       tg.setAttribute('color', new THREE.Float32BufferAttribute(tipColors.flatMap(c => [c.r, c.g, c.b]), 3));
-      syn.tipMat = new THREE.PointsMaterial({ size: 0.045, map: this.glowTex, vertexColors: true, transparent: true, opacity: 0.85,
+      syn.tipMat = new THREE.PointsMaterial({ size: 0.04, map: this.glowTex, vertexColors: true, transparent: true, opacity: 0.85,
         blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
       syn.dendrites.add(new THREE.Points(tg, syn.tipMat));
     }
@@ -928,16 +943,20 @@ function stepPill(t, byId) {
 function mergeIndexed(geos) {
   let vertices = 0, indices = 0;
   for (const geo of geos) { vertices += geo.attributes.position.count; indices += geo.index.count; }
+  const withColor = geos.length && geos.every(geo => geo.attributes.color);
   const pos = new Float32Array(vertices * 3);
+  const col = withColor ? new Float32Array(vertices * 3) : null;
   const idx = new Uint32Array(indices);
   let vo = 0, io = 0;
   for (const geo of geos) {
     pos.set(geo.attributes.position.array, vo * 3);
+    if (col) col.set(geo.attributes.color.array, vo * 3);
     for (const i of geo.index.array) idx[io++] = i + vo;
     vo += geo.attributes.position.count;
   }
   const merged = new THREE.BufferGeometry();
   merged.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  if (col) merged.setAttribute('color', new THREE.BufferAttribute(col, 3));
   merged.setIndex(new THREE.BufferAttribute(idx, 1));
   return merged;
 }
