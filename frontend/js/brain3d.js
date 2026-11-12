@@ -507,7 +507,7 @@ export class Brain {
     const done = Math.min(task.checklist_done || 0, steps);
     const primaries = 2 + steps;
     const depth = 1 + (g > 0.2 || steps >= 3 ? 1 : 0) + (g > 0.55 || steps >= 8 ? 1 : 0);
-    const reach = Math.min(0.26, 0.08 + 0.13 * g + 0.006 * steps);
+    const reach = Math.min(0.42, 0.13 + 0.2 * g + 0.01 * steps);
     const maxDist = reach * 2.1;
     const n = syn.normal;
     const inward = n.clone().negate();
@@ -515,41 +515,49 @@ export class Brain {
     const t2 = new THREE.Vector3().crossVectors(n, t1).normalize();
     const synColor = syn.core.material.color.clone();
     const glow = this.uniforms.uGlow.value.clone();                 // the brain's theme colour
+    // the brain's own tones (shell glow, point cloud, neural paths, pulses, core), in the current theme
+    // (weighted to the deeper, more saturated ones so overlapping branches don't wash out to white)
+    const palette = ['#3aa8ff', '#1d6bff', '#5fd8ff', '#2f86ff', '#7fe3ff', '#3aa8ff', '#1d6bff'].map(hex => new THREE.Color(themed(hex)));
     const origin = syn.group.position;
 
-    // keep a point inside its hemisphere (a little under the surface)
-    const inside = local => {
+    // keep a point in the brain's outer layer (between 60% and 90% of the way out to the surface), like dendrites
+    // spreading through the cortex. When a branch hits that layer's edge it is pushed back in and its heading loses
+    // the in/out part, so it keeps sweeping sideways through the brain instead of every branch funnelling to the centre.
+    const inside = (local, d) => {
       const q = local.clone().add(origin);
       const side = syn.slot.side || (q.x < 0 ? -1 : 1);
       const c = new THREE.Vector3(side * HEMI_CENTER_X, 0.08, 0);
       const dir = new THREE.Vector3((q.x - c.x) / 0.6, (q.y - c.y) / 0.72, q.z / 1.1).normalize();
-      const limit = hemisphereSurface(dir, side, false).p.distanceTo(c) * 0.9;
+      const surface = hemisphereSurface(dir, side, false).p.distanceTo(c);
       const r = q.distanceTo(c);
-      if (r > limit) q.sub(c).multiplyScalar(limit / r).add(c);
+      const limit = Math.min(Math.max(r, surface * 0.6), surface * 0.9);
+      if (limit !== r) {
+        const radial = q.clone().sub(c).normalize();
+        q.copy(c).addScaledVector(radial, limit);
+        if (d) d.addScaledVector(radial, -d.dot(radial)).normalize();
+      }
       return q.sub(origin);
     };
-    // colour at a point: synapse colour near the root, theme glow and dimmer deeper in
-    const shade = (local, on) => {
+    // colour at a point: a hint of the synapse's colour near the root, the branch's own brain tone further out
+    const shade = (local, on, tone) => {
       const t = Math.min(1, local.length() / maxDist);
-      return synColor.clone().lerp(glow, 0.3 + 0.6 * t).multiplyScalar((on ? 0.75 : 0.42) * (1 - 0.55 * t));
+      return synColor.clone().lerp(tone, 0.7 + 0.3 * t).multiplyScalar((on ? 0.62 : 0.4) * (1 - 0.4 * t));
     };
 
     const tubes = [], tips = [], tipColors = [];
-    const branch = (start, dir, len, radius, level, rnd, on) => {
+    const branch = (start, dir, len, radius, level, rnd, on, tone) => {
       const pts = [start.clone()];
       const d = dir.clone();
-      const segs = 5;
+      const segs = 6;
       for (let s = 1; s <= segs; s++) {
-        d.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.3)).normalize();
-        const next = inside(pts[s - 1].clone().addScaledVector(d, len / segs));
-        d.copy(next).sub(pts[s - 1]).normalize();
-        pts.push(next);
+        d.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.3)).addScaledVector(inward, 0.05).normalize();
+        pts.push(inside(pts[s - 1].clone().addScaledVector(d, len / segs), d));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
       const tube = new THREE.TubeGeometry(curve, 10, radius, 4, false);
       const pos = tube.attributes.position, v = new THREE.Vector3(), colors = new Float32Array(pos.count * 3);
       for (let i = 0; i < pos.count; i++) {
-        const c = shade(v.fromBufferAttribute(pos, i), on);
+        const c = shade(v.fromBufferAttribute(pos, i), on, tone);
         colors.set([c.r, c.g, c.b], i * 3);
       }
       tube.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -557,15 +565,16 @@ export class Brain {
       if (level >= depth) {
         const tip = pts[segs];
         tips.push(tip);
-        tipColors.push(shade(tip, on).multiplyScalar(on ? 1.9 : 1.4));
+        tipColors.push(shade(tip, on, tone).multiplyScalar(on ? 2.2 : 1.6));
         return;
       }
       const kids = level === 1 && rnd() > 0.55 ? 3 : 2;
       const axis = new THREE.Vector3().crossVectors(d, Math.abs(d.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
       for (let k = 0; k < kids; k++) {
-        const turn = (k - (kids - 1) / 2) * (0.45 + rnd() * 0.35);
+        const turn = (k - (kids - 1) / 2) * (0.7 + rnd() * 0.5);                  // split wide, like real dendrites
         const childDir = d.clone().applyAxisAngle(axis.clone().applyAxisAngle(d, rnd() * Math.PI * 2), turn);
-        branch(curve.getPoint(0.65 + rnd() * 0.3), childDir, len * (0.55 + rnd() * 0.15), radius * 0.62, level + 1, rnd, on);
+        const childTone = tone.clone().lerp(palette[Math.floor(rnd() * palette.length)], 0.35);
+        branch(curve.getPoint(0.6 + rnd() * 0.3), childDir, len * (0.6 + rnd() * 0.15), radius * 0.65, level + 1, rnd, on, childTone);
       }
     };
 
@@ -573,10 +582,12 @@ export class Brain {
       let seed = (task.id * 7919 + i * 104729) % 233280;
       const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
       const around = i * 2.39996 + rnd() * 0.35;                                 // golden angle: evenly spread
-      const tilt = 0.45 + rnd() * 0.6;                                            // 25-60° off straight in
+      const tilt = 1.05 + rnd() * 0.4;                                            // leave almost sideways (60-83° off straight in)...
       const sideways = t1.clone().multiplyScalar(Math.cos(around)).addScaledVector(t2, Math.sin(around));
       const dir = inward.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(sideways, Math.sin(tilt)).normalize();
-      branch(new THREE.Vector3(), dir, reach * (0.75 + rnd() * 0.5), 0.0046 * (0.85 + rnd() * 0.3), 1, rnd, i < done);
+      const tone = palette[Math.floor(rnd() * palette.length)].clone().lerp(palette[Math.floor(rnd() * palette.length)], rnd() * 0.5);
+      const start = sideways.clone().multiplyScalar(0.012);                       // ...from around the cell body, not one point
+      branch(start, dir, reach * (0.75 + rnd() * 0.5), 0.0075 * (0.85 + rnd() * 0.3), 1, rnd, i < done, tone);   // ...and curve down into the brain
     }
 
     const mesh = new THREE.Mesh(mergeIndexed(tubes), new THREE.MeshBasicMaterial({
