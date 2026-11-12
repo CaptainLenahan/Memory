@@ -512,20 +512,33 @@ export class Brain {
     const t2 = new THREE.Vector3().crossVectors(n, t1).normalize();
     const lit = [], dim = [], tips = [], tipColors = [];
     const color = syn.core.material.color;
+    // Keep every branch on the brain: project each point back onto the surface (just above it), so dendrites wrap
+    // around the brain's curve instead of running off along a flat plane at the edge.
+    const origin = syn.group.position;
+    const toSurface = local => {
+      const q = local.clone().add(origin);
+      const side = syn.slot.side || (q.x < 0 ? -1 : 1);
+      const dir = new THREE.Vector3((q.x - side * HEMI_CENTER_X) / 0.6, (q.y - 0.08) / 0.72, q.z / 1.1).normalize();
+      const surface = hemisphereSurface(dir, side).p;
+      const out = surface.clone().sub(new THREE.Vector3(side * HEMI_CENTER_X, 0.08, 0)).normalize();
+      return surface.addScaledVector(out, 0.008).sub(origin);
+    };
     const bright = color.clone().lerp(new THREE.Color(1, 1, 1), 0.45);
 
     const branch = (start, dir, len, radius, level, rnd, on) => {
       const pts = [start.clone()];
       const d = dir.clone();
-      for (let s = 1; s <= 4; s++) {
-        d.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.45));
-        d.sub(n.clone().multiplyScalar(d.dot(n) * 0.85)).normalize();          // hug the brain's surface
-        pts.push(pts[s - 1].clone().addScaledVector(d, len / 4).addScaledVector(n, -0.0035 * s));
+      const segs = 6;
+      for (let s = 1; s <= segs; s++) {
+        d.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.35)).normalize();
+        const next = toSurface(pts[s - 1].clone().addScaledVector(d, len / segs));
+        d.copy(next).sub(pts[s - 1]).normalize();                              // carry on along the surface
+        pts.push(next);
       }
       const curve = new THREE.CatmullRomCurve3(pts);
-      (on ? lit : dim).push(new THREE.TubeGeometry(curve, 8, radius, 4, false));
+      (on ? lit : dim).push(new THREE.TubeGeometry(curve, 12, radius, 4, false));
       if (level >= depth) {
-        tips.push(pts[4]);
+        tips.push(pts[segs]);
         tipColors.push(on ? bright : color.clone().multiplyScalar(0.8));
         return;
       }
@@ -543,7 +556,7 @@ export class Brain {
       const ang = i * 2.39996 + rnd() * 0.35;                                      // golden angle: evenly spread
       const dir = t1.clone().multiplyScalar(Math.cos(ang)).addScaledVector(t2, Math.sin(ang));
       const on = i < done;                                                         // first branches = finished steps
-      branch(n.clone().multiplyScalar(0.004), dir, reach * (0.75 + rnd() * 0.5), 0.0048 * (0.85 + rnd() * 0.3), 1, rnd, on);
+      branch(new THREE.Vector3(), dir, reach * (0.75 + rnd() * 0.5), 0.0048 * (0.85 + rnd() * 0.3), 1, rnd, on);
     }
 
     const add = (geos, opacity) => {
