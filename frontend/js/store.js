@@ -32,10 +32,10 @@ export const store = {
 
 const refreshSoon = debounce(() => store.refresh().catch(() => {}), 150);
 
-export function connectEvents() {
+export function connectEvents(client = null) {
   let es;
   const open = () => {
-    es = new EventSource('/api/events');
+    es = new EventSource(client ? `/api/events?client=${client}` : '/api/events');
     es.addEventListener('state', refreshSoon);
     for (const name of ['reminder', 'planner', 'popup', 'windows', 'wallpaper']) {
       es.addEventListener(name, e => {

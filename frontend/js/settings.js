@@ -24,12 +24,17 @@ export async function openSettings() {
   const autoSync = h('input', { type: 'checkbox', checked: s.planner_auto_sync });
   const plannerBox = h('div');
   const links = quickLinksEditor(s.quick_links || []);
-  const wallpaperOn = h('input', { type: 'checkbox', checked: s.desktop_wallpaper });
+  const wallpaperMode = s.start_lively ? 'lively' : s.desktop_wallpaper ? 'builtin' : 'off';
+  const wallpaperOn = h('select', { class: 'input' }, [
+    ['lively', 'Lively Wallpaper (Memory starts it)'], ['builtin', 'Memory\'s built-in wallpaper'], ['off', 'Off']]
+    .map(([v, l]) => h('option', { value: v, selected: wallpaperMode === v }, l)));
   const wallpaperScreens = h('select', { class: 'input' }, [['all', 'All screens'], ['primary', 'Main screen only']]
     .map(([v, l]) => h('option', { value: v, selected: (s.wallpaper_screens || 'all') === v }, l)));
   const wallpaperStatus = h('div', { class: 'status-line' }, '…');
   api('/api/wallpaper').then(w => {
-    wallpaperStatus.textContent = w.running ? `On, ${w.screens} screen${w.screens === 1 ? '' : 's'}` : w.enabled ? `Not showing: ${w.reason}` : 'Off';
+    wallpaperStatus.textContent = w.lively?.enabled
+      ? (w.lively.installed ? `Lively ${w.lively.running ? 'is running' : 'is not running'}${w.lively.reason && w.lively.reason !== 'off' ? ` (${w.lively.reason})` : ''}` : w.lively.reason)
+      : w.running ? `Built-in: on, ${w.screens} screen${w.screens === 1 ? '' : 's'}` : w.enabled ? `Built-in: not showing: ${w.reason}` : 'Off';
   }).catch(() => { wallpaperStatus.textContent = ''; });
   const aboutBox = h('div', { class: 'status-line' }, 'Memory');
   const checkUpdates = async () => {
@@ -84,9 +89,9 @@ export async function openSettings() {
     plannerBox,
     h('div', { class: 'form-section' }, 'Desktop wallpaper'),
     h('div', { class: 'form-grid' },
-      h('label', {}, 'Show on desktop'), h('label', {}, wallpaperOn, ' Show the brain as my desktop wallpaper, behind my icons'),
-      h('label', {}, 'Screens'), wallpaperScreens,
-      h('div', { class: 'help' }, 'Click synapses, drag them and use quick links right on the desktop. It pauses while a maximised or full-screen app covers it. If Lively Wallpaper is running, Memory leaves the desktop to it.'),
+      h('label', {}, 'Wallpaper'), wallpaperOn,
+      h('div', { class: 'help' }, 'Lively: set Lively\'s wallpaper to http://localhost:8765/?wallpaper once; Memory then starts Lively after its server is ready (and turns off Lively\'s own start-at-sign-in, which would load the page too early). Built-in: Memory draws the brain behind your icons itself.'),
+      h('label', {}, 'Screens (built-in)'), wallpaperScreens,
       h('label', {}, 'Status'), wallpaperStatus),
     h('div', { class: 'form-section' }, 'Quick links'),
     h('div', { class: 'help', style: { marginBottom: '8px' } }, 'Shown on the desktop wallpaper (bottom-left) and in the left rail. Use a web address, an app link like ms-teams:, or a folder/file path such as C:\\Reports or ~\\Downloads.'),
@@ -106,7 +111,10 @@ export async function openSettings() {
       planner_auto_sync: autoSync.checked, quick_links: links.value(), notify_email: notifyEmail.value.trim(),
     };
     // only when changed here: a dialog opened earlier must not switch the wallpaper back off (or on)
-    if (wallpaperOn.checked !== !!s.desktop_wallpaper) values.desktop_wallpaper = wallpaperOn.checked;
+    if (wallpaperOn.value !== wallpaperMode) {
+      values.start_lively = wallpaperOn.value === 'lively';
+      values.desktop_wallpaper = wallpaperOn.value === 'builtin';
+    }
     if (wallpaperScreens.value !== (s.wallpaper_screens || 'all')) values.wallpaper_screens = wallpaperScreens.value;
     if (key.value.trim()) values.anthropic_api_key = key.value.trim();
     try {

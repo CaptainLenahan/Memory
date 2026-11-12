@@ -448,6 +448,7 @@ export class Brain {
       label.innerHTML = `<span class="syn-idx">${slot.index + 1}</span><span class="syn-title">Empty synapse</span>`;
       this.labelLayer.appendChild(label);
       const syn = { index: slot.index, slot, group, core, halo, ring, urgency, hit, dendrites, label, normal, baseColor: color, task: null, growth: -1 };
+      this.bindLabel(syn);
       hit.userData.syn = syn;
       this.synapses.push(syn);
     }
@@ -583,26 +584,7 @@ export class Brain {
     el.addEventListener('pointerdown', e => {
       if (this.locked) return;
       const syn = this.synapseAtEvent(e);
-      if (!syn) return;
-      if (this.arranging) { this.startArrangeDrag(syn, e); return; }
-      this.controls.enabled = false;
-      const start = { x: e.clientX, y: e.clientY };
-      let dragging = false;
-      const move = ev => {
-        if (!dragging && syn.task && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 8) {
-          dragging = true;
-          this.handlers.onSynapseDragStart?.(syn.task, ev);
-        }
-      };
-      const up = ev => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        this.controls.enabled = !this.locked;
-        if (dragging) return;
-        this.click(syn, ev);
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
+      if (syn) this.press(syn, e);
     });
   }
 
@@ -648,6 +630,49 @@ export class Brain {
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
+  }
+
+  // Pressing a synapse, on its node or its label: drag it somewhere, click it, or double-click it.
+  press(syn, e) {
+    if (this.arranging) { this.startArrangeDrag(syn, e); return; }
+    this.controls.enabled = false;
+    const start = { x: e.clientX, y: e.clientY };
+    let dragging = false;
+    const move = ev => {
+      if (!dragging && syn.task && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 8) {
+        dragging = true;
+        this.handlers.onSynapseDragStart?.(syn.task, ev);
+      }
+    };
+    const up = ev => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this.controls.enabled = !this.locked;
+      if (dragging) return;
+      this.click(syn, ev);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // The text label next to a node behaves exactly like the node.
+  bindLabel(syn) {
+    const { label } = syn;
+    label.addEventListener('pointerdown', e => {
+      if (this.locked || e.button !== 0) return;
+      e.preventDefault();       // no text selection while dragging from a label
+      e.stopPropagation();
+      this.press(syn, e);
+    });
+    label.addEventListener('pointerenter', () => {
+      if (this.locked) return;
+      this.hovered = syn;
+      label.classList.add('hover');
+    });
+    label.addEventListener('pointerleave', () => {
+      if (this.hovered === syn) this.hovered = null;
+      label.classList.remove('hover');
+    });
   }
 
   // A second click on the same synapse within 300 ms is a double-click (create a task there). A single click waits

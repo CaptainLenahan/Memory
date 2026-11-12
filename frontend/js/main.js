@@ -462,4 +462,4 @@ store.refresh().then(() => {
     checkForUpdate();
   }
 }).catch(toastError);
-connectEvents();
+connectEvents(WALLPAPER ? 'wallpaper' : null);

@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse  # n
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
-from . import claude_service, db, desktop, engine, mail, notify, paths, planner_push, planner_sync, sysinfo, tunnel, wallpaper, windows  # noqa: E402
+from . import claude_service, db, desktop, engine, lively, mail, notify, paths, planner_push, planner_sync, sysinfo, tunnel, wallpaper, windows  # noqa: E402
 from .classifier import creative_score, region_for  # noqa: E402
 from .models import (  # noqa: E402
     ChatBody, ChecklistCreate, ChecklistUpdate, DelegateApply, DependencyBody, InsightBody, LinkBody, LoginBody, OpenBody, PlaceBody,
@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI):
         threading.Timer(2, wallpaper.start, args=(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))).start()
     if s.get("dev_tunnel_id"):
         tunnel.start(s["dev_tunnel_id"])
+    if s.get("start_lively") and not s.get("desktop_wallpaper"):
+        lively.ensure(wallpaper.port_from_env())
     yield
     task.cancel()
     wallpaper.stop()
@@ -649,12 +651,19 @@ def put_settings(body: SettingsUpdate):
     values = body.model_dump(exclude_unset=True)
     if values.get("anthropic_api_key") == "":
         values.pop("anthropic_api_key")  # blank field means "keep the current key"
+    # one desktop wallpaper at a time: Lively, or Memory's built-in one
+    if values.get("start_lively"):
+        values["desktop_wallpaper"] = False
+    elif values.get("desktop_wallpaper"):
+        values["start_lively"] = False
     with db.connect() as con:
         db.set_settings(con, values)
         changed(con, fill=True)
         s = db.get_settings(con)
     if "dev_tunnel_id" in values:
         tunnel.start(s.get("dev_tunnel_id") or "")
+    if values.get("start_lively"):
+        lively.ensure(wallpaper.port_from_env(), delay=0)
     if "desktop_wallpaper" in values or ("wallpaper_screens" in values and s.get("desktop_wallpaper")):
         if s.get("desktop_wallpaper"):
             wallpaper.start(wallpaper.port_from_env(), s.get("wallpaper_screens", "all"))
@@ -666,8 +675,9 @@ def put_settings(body: SettingsUpdate):
 @app.get("/api/wallpaper")
 def wallpaper_status():
     with db.connect() as con:
-        enabled = bool(db.get_settings(con).get("desktop_wallpaper"))
-    return {"enabled": enabled, **wallpaper.status()}
+        s = db.get_settings(con)
+    return {"enabled": bool(s.get("desktop_wallpaper")), **wallpaper.status(),
+            "lively": {"enabled": bool(s.get("start_lively")), **lively.status()}}
 
 
 @app.post("/api/wallpaper/restart")
@@ -918,6 +928,8 @@ def planner_push_status():
 
 @app.get("/api/events")
 async def events(request: Request):
+    if request.query_params.get("client") == "wallpaper":
+        lively.note_wallpaper_client()
     q = bus.subscribe()
 
     async def stream():

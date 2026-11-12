@@ -720,3 +720,7 @@ body.arranging #brain-canvas canvas { cursor: move; }
   color: var(--muted); background: rgba(var(--t-5fd8ff), 0.06); border: 1px solid var(--line); }
 .planner-note svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--accent); }
 .tp-title textarea[readonly] { cursor: default; }
+
+/* synapse labels are clickable like their nodes (the layer itself still lets drags through to the brain) */
+#brain-labels .syn-label { pointer-events: auto; cursor: pointer; user-select: none; }
+body.arranging #brain-labels .syn-label { cursor: move; }

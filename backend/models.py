@@ -100,6 +100,7 @@ class SettingsUpdate(BaseModel):
     slot_positions: Optional[dict[str, list[float]]] = None
     welcomed: Optional[bool] = None
     desktop_wallpaper: Optional[bool] = None
+    start_lively: Optional[bool] = None
     dev_tunnel_id: Optional[str] = Field(default=None, max_length=80, pattern=r"^$|^[A-Za-z0-9][A-Za-z0-9.\-]*$")
     wallpaper_screens: Optional[Literal["all", "primary"]] = None
     notify_email: Optional[str] = Field(default=None, max_length=254, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")

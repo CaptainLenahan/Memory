@@ -50,15 +50,14 @@ powershell -ExecutionPolicy Bypass -File scripts\startup.ps1
 
 ### Use the brain as your desktop wallpaper
 
-Memory can put the brain on your desktop itself, behind your icons and on every screen. No other app is needed. Turn it on in **Settings → Desktop wallpaper** (or from the welcome screen), and choose **All screens** or **Main screen only**.
+Choose one in **Settings → Desktop wallpaper**:
 
-- **How it works:** one borderless Edge window per screen shows `http://localhost:8765/?wallpaper`, slotted into Windows' desktop layer between your icons and the normal wallpaper. Both the newer Windows 11 (24H2+) desktop and the classic one are supported.
-- **Clicking:** mouse movement, clicks, drags and the scroll wheel over the bare desktop are passed through to the brain. Over any other window, nothing is passed through.
-- **Pausing:** a screen's brain stops drawing while a maximised or full-screen window covers it, and while a Memory pop-up is open.
-- **Restarts:** if Explorer restarts, the wallpaper rebuilds itself. If Lively Wallpaper is running, Memory gives the desktop to it, so close or uninstall Lively to use the built-in one.
-- **Profile:** the wallpaper windows use their own small Edge profile, `wallpaper-profile` in the data folder.
+- **Lively Wallpaper (recommended).** Install the free [Lively Wallpaper](https://www.rocksdanister.com/lively/) app. In Lively, choose **+ Add Wallpaper**, paste `http://localhost:8765/?wallpaper` and apply it. Then pick **Lively Wallpaper (Memory starts it)** in Memory's Settings.
+  - **Start-up order:** Memory starts Lively once its own server is ready and turns off Lively's own start-at-sign-in. If Lively started first, its page would load before the server and stay blank.
+  - **Recovery:** if Lively was already running and its Memory page never connected, Memory restarts Lively once to fix it.
+- **Memory's built-in wallpaper.** Memory draws the brain behind your icons itself, with no other app, on all screens or just the main one. It pauses under maximised or full-screen windows and rebuilds itself after Explorer restarts or screen changes.
 
-You can still use [Lively Wallpaper](https://www.rocksdanister.com/lively/) instead: leave the setting off, then in Lively choose **+ Add Wallpaper** and paste `http://localhost:8765/?wallpaper`.
+Either way the wallpaper is a page Memory serves, so the Memory server has to be running, which it does from sign-in.
 
 Working from the desktop (the wallpaper only gets mouse input, so typing happens in pop-up windows):
 

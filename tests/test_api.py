@@ -378,3 +378,29 @@ def test_dev_tunnel_setting_starts_and_stops_hosting(monkeypatch):
         status = client.get("/api/tunnel").json()
         assert "running" in status and "url" in status
     assert calls == ["memory-sync", ""]
+
+
+def test_one_desktop_wallpaper_at_a_time(monkeypatch):
+    from backend import lively, wallpaper
+    calls = []
+    monkeypatch.setattr(lively, "ensure", lambda port, delay=3.0, recover_after=25.0: calls.append(("lively", delay)))
+    monkeypatch.setattr(wallpaper, "start", lambda port, screens="all": calls.append(("builtin",)))
+    monkeypatch.setattr(wallpaper, "stop", lambda wait=True: calls.append(("builtin-stop",)))
+    with TestClient(app) as client:
+        s = client.put("/api/settings", json={"desktop_wallpaper": True}).json()
+        assert s["desktop_wallpaper"] and not s["start_lively"]
+        s = client.put("/api/settings", json={"start_lively": True}).json()
+        assert s["start_lively"] and not s["desktop_wallpaper"]
+        assert client.get("/api/wallpaper").json()["lively"]["enabled"] is True
+        client.put("/api/settings", json={"start_lively": False})
+    assert ("lively", 0) in calls and ("builtin-stop",) in calls
+
+
+def test_wallpaper_page_connection_is_noticed():
+    import time as _t
+    from backend import lively
+    before = _t.monotonic()
+    with TestClient(app) as client:
+        with client.stream("GET", "/api/events?client=wallpaper") as r:
+            next(r.iter_lines())
+    assert lively._wallpaper_seen >= before
