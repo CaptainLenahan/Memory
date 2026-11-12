@@ -358,7 +358,11 @@ onThemeChange(() => {
 });
 
 let serverTheme = null; // follow the server only when its value changes, so a refresh in flight can't undo a local pick
+let loadedVersion = null; // Memory was updated while this page stayed open (e.g. Lively's wallpaper): load the new version
 store.on(() => {
+  const version = store.state.version;
+  if (loadedVersion && version && version !== loadedVersion && !(POPUP && panel.isOpen())) { location.reload(); return; }
+  loadedVersion ||= version;
   const theme = store.state.settings?.theme;
   if (theme && theme !== serverTheme) { serverTheme = theme; if (theme !== currentTheme().id) applyTheme(theme); }
   if (POPUP) { panel.refreshIfOpen(); return; }
