@@ -678,8 +678,20 @@ body.popup-window #toasts { left: 16px; bottom: 64px; }
 .mail-row.compact .mail-actions { margin-top: 5px; }
 .mail-row.compact .btn.small { height: 24px; font-size: 11.5px; }
 
-/* wallpaper inbox, top-right */
-.wp-inbox { left: auto; right: 26px; top: 22px; bottom: auto; width: 300px; max-height: calc(100% - 330px); overflow-y: auto; }
+/* wallpaper basket, top-right: click a card to open it, drag it onto a synapse */
+.wp-basket { left: auto; right: 26px; top: 22px; bottom: auto; width: 300px; max-height: calc(100% - 330px); overflow-y: auto; }
+.wp-basket-list { display: grid; gap: 6px; }
+.wp-basket-card { padding: 7px 10px 7px 11px; border-radius: 8px; cursor: grab; user-select: none; touch-action: none;
+  background: rgba(var(--t-0e2040), 0.65); border: 1px solid var(--line); border-left: 3px solid var(--c); }
+.wp-basket-card:hover { border-color: var(--accent); border-left-color: var(--c); }
+.wp-basket-card:active { cursor: grabbing; }
+.wp-basket-card .title { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-basket-card .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; font-size: 11px; color: var(--muted); }
+.wp-basket-card .meta span { display: inline-flex; align-items: center; gap: 3px; }
+.wp-basket-card .meta svg { width: 12px; height: 12px; }
+.wp-basket-card .meta .late { color: var(--danger); }
+.wp-basket-card .meta .soon { color: var(--warn, #f5b519); }
+.wp-basket .none { margin-top: 2px; }
 
 /* templates */
 .qa-tpl { background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 4px; display: grid; place-items: center; }

@@ -7,12 +7,12 @@ import { dropOnSlot, initDragDrop, startSynapseDrag } from './dragdrop.js';
 import { initLists, renderListPane, renderQueue, renderRail } from './lists.js';
 import { openSettings, syncPlanner } from './settings.js';
 import { connectEvents, mutate, store } from './store.js';
-import { inboxPanel, initInbox, loadInbox, onInboxChange } from './inbox.js';
+import { initInbox, onInboxChange } from './inbox.js';
 import { quickLinkButtons } from './quicklinks.js';
 import { templateMeta, Templates } from './templates.js';
 import * as panel from './taskPanel.js';
 import { applyTheme, currentTheme, onThemeChange } from './themes.js';
-import { addDays, closePopover, debounce, fmtDate, h, icon, modal, popover, REGION_VAR, renderMarkdown, toast, toastError, todayISO } from './ui.js';
+import { addDays, closePopover, debounce, dueClass, fmtDate, h, icon, modal, popover, REGION_VAR, renderMarkdown, toast, toastError, todayISO } from './ui.js';
 
 // ?wallpaper: a brain-only view for a live desktop wallpaper (Lively). The wallpaper only gets mouse input, so quick
 //   actions happen in place and anything that needs typing opens a pop-up window.
@@ -144,20 +144,63 @@ function renderQuickLinks() {
     buttons.length ? h('div', { class: 'grid' }, buttons) : h('div', { class: 'none' }, 'Add links in Settings → Quick links.'));
 }
 
-const renderWallpaperInbox = () => document.getElementById('wp-inbox')?.replaceChildren(...inboxPanel());
+// Wallpaper Basket (top-right): tasks waiting to be placed, from Planner or typed in. Click a card to open it;
+// drag it onto a synapse to place it. The drag is pointer-based (not HTML drag-and-drop) because Lively forwards
+// mouse input to the page, which the browser's built-in drag-and-drop doesn't pick up.
+const BASKET_SHOWN = 8;
+function basketCard(t) {
+  const meta = [];
+  if (t.source === 'planner') meta.push(h('span', { title: 'From Microsoft Planner' }, icon('planner'), 'Planner'));
+  if (t.due_at) meta.push(h('span', { class: dueClass(t) }, icon('calendar'), fmtDate(t.due_at)));
+  if (t.percent_complete > 0 && t.percent_complete < 100) meta.push(h('span', {}, `${t.percent_complete}%`));
+  if (t.checklist_total) meta.push(h('span', {}, `${t.checklist_done}/${t.checklist_total}`));
+  let dragged = false;
+  const card = h('div', {
+    class: 'wp-basket-card', title: 'Click to open · drag onto a synapse to place it',
+    style: `--c:${REGION_VAR[t.region] || REGION_VAR.balanced}`,
+    onclick: () => { if (!dragged) openTaskWindow(t.id); dragged = false; },
+  }, h('div', { class: 'title' }, t.title), meta.length ? h('div', { class: 'meta' }, meta) : null);
+  card.addEventListener('pointerdown', down => {
+    if (down.button !== 0) return;
+    dragged = false;
+    const move = e => {
+      if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 6) return;
+      dragged = true;
+      stop();
+      startSynapseDrag(t, e);   // ghost follows the pointer, synapses highlight, drop places the task
+    };
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  });
+  return card;
+}
+function renderWallpaperBasket() {
+  const el = document.getElementById('wp-basket');
+  if (!el) return;
+  const far = '9999-12-31';
+  const tasks = store.state.tasks.filter(t => t.status === 'basket')
+    .sort((a, b) => (a.due_at || far).localeCompare(b.due_at || far) || b.id - a.id);
+  el.replaceChildren(
+    h('div', { class: 'wp-links-head' }, h('span', {}, `Basket${tasks.length ? ` · ${tasks.length}` : ''}`),
+      h('button', { class: 'edit', title: 'Open the basket in Memory', onclick: () => openWindow({ window: 'app' }) }, 'Open')),
+    tasks.length
+      ? h('div', { class: 'wp-basket-list' }, tasks.slice(0, BASKET_SHOWN).map(basketCard),
+        tasks.length > BASKET_SHOWN ? h('div', { class: 'none' }, `+ ${tasks.length - BASKET_SHOWN} more in Memory`) : null)
+      : h('div', { class: 'none' }, 'Basket is empty. New and Planner tasks land here.'));
+}
 
 if (WALLPAPER) {
   const view = document.getElementById('view-brain');
   view.append(h('div', { class: 'wp-sys', id: 'wp-sys', 'aria-hidden': 'true' }), h('div', { class: 'wp-links', id: 'wp-links' }),
-    h('div', { class: 'wp-links wp-inbox', id: 'wp-inbox' }));
+    h('div', { class: 'wp-links wp-basket', id: 'wp-basket' }));
   pollSystem();
-  setInterval(() => loadInbox(true), 5 * 60_000);
 }
 initInbox({
   openTask: id => (WALLPAPER ? openTaskWindow(id) : panel.open(id)),
   openSettings: () => (WALLPAPER ? openWindow({ window: 'app', view: 'settings' }) : openSettings()),
 });
-onInboxChange(() => (WALLPAPER ? renderWallpaperInbox() : renderListPane()));
+onInboxChange(() => { if (!WALLPAPER) renderListPane(); });
 
 // ---------- first run + updates (full app only) ----------
 function showWelcome() {
@@ -366,7 +409,7 @@ store.on(() => {
   const theme = store.state.settings?.theme;
   if (theme && theme !== serverTheme) { serverTheme = theme; if (theme !== currentTheme().id) applyTheme(theme); }
   if (POPUP) { panel.refreshIfOpen(); return; }
-  if (WALLPAPER) { renderBrain(); renderWallpaperHud(); renderQuickLinks(); renderWallpaperInbox(); lockForWindows(store.state.windows_open); return; }
+  if (WALLPAPER) { renderBrain(); renderWallpaperHud(); renderQuickLinks(); renderWallpaperBasket(); lockForWindows(store.state.windows_open); return; }
   renderRail();
   renderListPane();
   renderQueue();
