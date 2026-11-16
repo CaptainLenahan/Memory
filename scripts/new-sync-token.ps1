@@ -35,4 +35,4 @@ Get-Process -Name 'Memory' -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object CommandLine -like '*launcher.pyw*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-Sleep -Seconds 1
 if (Get-ScheduledTask -TaskName 'Memory' -ErrorAction SilentlyContinue) { Start-ScheduledTask -TaskName 'Memory'; 'Memory restarted.' }
-else { 'Start Memory again (Start menu → Memory) so it picks up the token.' }
+else { 'Start Memory again (Start menu > Memory) so it picks up the token.' }
